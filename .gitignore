@@ -1,0 +1,109 @@
+# ----- OS / Editor sloj -----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+
+# ----- Git -----
+.git-credentials
+*.orig
+
+# ----- .NET / Visual Studio / Rider -----
+bin/
+obj/
+[Bb]uild/
+[Ll]ogs/
+.vs/
+*.user
+*.suo
+*.userprefs
+*.ncrunch*
+TestResult*/
+[TestResults]/
+*.coverage
+*.coveragexml
+
+# Paket menadžeri
+*.nupkg
+*.snupkg
+packages/
+artifacts/
+
+# ----- Konfiguracije i tajne (NE u repo) -----
+*.env
+*.env.*           # npr. .env.local, .env.development
+.envrc
+secrets.json
+appsettings.*.Development.json
+appsettings.Local.json
+appsettings.Secret.json
+# (Obavezno drži appsettings.json u repo, ali ne Development varijante sa tajnama)
+
+# .NET User Secrets folder (ako slučajno završi u projektu)
+**/.microsoft/usersecrets/**
+
+# ----- Java / Maven / Spring Boot -----
+target/
+*.jar
+*.war
+*.ear
+*.class
+.mvn/
+mvnw
+mvnw.cmd
+.mvn/wrapper/maven-wrapper.jar
+
+# ----- EF Core / DB fajlovi -----
+*.mdf
+*.ldf
+*.db
+*.sqlite
+*.sqlite3
+# EF migracije (*.cs) idu u repo, ali ne runtime DB fajlovi
+
+# ----- Node / Frontend -----
+node_modules/
+dist/
+build/
+.npmrc
+pnpm-lock.yaml
+yarn.lock
+# (lock fajl možeš i zadržati po želji stabilnosti, timska odluka)
+
+# ----- Coverage / lint / cache -----
+coverage/
+.nyc_output/
+.eslintcache
+.stylelintcache
+
+# ----- Docker / Compose / Volumes -----
+docker-data/
+**/tmp/
+**/.temp/
+**/.cache/
+
+# ----- Slike / exporti / velike datoteke -----
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.mp4
+*.mov
+*.psd
+
+# ----- JetBrains Rider .idea content (ako ti smeta sve) -----
+# .idea/ već gore; po potrebi whitelisti .idea/runConfigurations/ ako želiš
+
+# ----- IT Company specific -----
+# Qdrant data
+qdrant-data/
+# Elasticsearch data
+elasticsearch-data/
+# Log files
+*.log
+logs/
+# Temporary files
+temp/
+tmp/

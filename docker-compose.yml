@@ -1,0 +1,101 @@
+services:
+  # Qdrant vektorska baza podataka za recruitment service
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333" # HTTP API
+      - "6334:6334" # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - it-company-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6333/ || exit 1"]
+      interval: 20s
+      timeout: 15s
+      retries: 15
+      start_period: 30s
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+
+  # Elasticsearch baza podataka za recruitment service
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - it-company-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Recruitment Service (Java Spring Boot)
+  recruitment-service:
+    build:
+      context: ./services/recruitment-service
+      dockerfile: Dockerfile
+    container_name: recruitment-service
+    restart: on-failure
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - QDRANT_URL=http://qdrant:6333
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SERVER_PORT=8081
+    ports:
+      - "5001:8081"
+    depends_on:
+      - qdrant
+      - elasticsearch
+    networks:
+      - it-company-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # API Gateway
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - JWT_KEY=it_company_secret_key_very_long_and_secure_key_for_production
+      - JWT_ISSUER=it-company
+      - JWT_AUDIENCE=it-company-users
+      - RECRUITMENT_SERVICE_URL=http://recruitment-service:8081
+    ports:
+      - "5000:80"
+    depends_on:
+      - recruitment-service
+    networks:
+      - it-company-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  qdrant_data:
+  elasticsearch_data:
+
+networks:
+  it-company-network:
+    driver: bridge
