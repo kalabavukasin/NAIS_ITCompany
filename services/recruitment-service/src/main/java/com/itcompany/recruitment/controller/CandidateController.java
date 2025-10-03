@@ -2,6 +2,7 @@ package com.itcompany.recruitment.controller;
 
 import com.itcompany.recruitment.model.Candidate;
 import com.itcompany.recruitment.dto.CandidateSearchRequest;
+import com.itcompany.recruitment.dto.SimpleCandidateSearchRequest;
 import com.itcompany.recruitment.service.CandidateService;
 import com.itcompany.recruitment.service.TransactionalCandidateService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -62,11 +63,11 @@ public class CandidateController {
     }
     
     @PostMapping("/search")
-    @Operation(summary = "Search candidates with vector similarity and filters")
+    @Operation(summary = "Simple candidate search with basic filters")
     public ResponseEntity<List<Candidate>> searchCandidates(
-            @RequestBody CandidateSearchRequest request) {
+            @RequestBody SimpleCandidateSearchRequest request) {
         return ResponseEntity.ok(
-            candidateService.searchCandidatesWithVectorAndFilters(request));
+            candidateService.simpleSearchCandidates(request));
     }
     
     @PostMapping("/hybrid-search")

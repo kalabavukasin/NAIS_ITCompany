@@ -5,7 +5,7 @@ import org.springframework.data.elasticsearch.annotations.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
-@Document(indexName = "job_postings")
+@Document(indexName = "job_advertisements")
 @Setting(settingPath = "elasticsearch-settings.json")
 public class JobPosting {
     @Id
@@ -16,9 +16,6 @@ public class JobPosting {
 
     @Field(type = FieldType.Text, analyzer = "standard")
     private String description;
-
-    @Field(type = FieldType.Dense_Vector, dims = 768)
-    private float[] descriptionVector;
 
     @Field(type = FieldType.Keyword)
     private String department;
@@ -67,7 +64,7 @@ public class JobPosting {
 
     public JobPosting() {}
 
-    public JobPosting(String id, String title, String description, float[] descriptionVector, String department,
+    public JobPosting(String id, String title, String description, String department,
                       String location, String experienceLevel, Integer minYearsExperience, Integer maxYearsExperience,
                       List<String> requiredSkills, List<String> preferredSkills, Double minSalary, Double maxSalary,
                       String employmentType, Boolean isActive, LocalDateTime postedDate, LocalDateTime applicationDeadline,
@@ -75,7 +72,6 @@ public class JobPosting {
         this.id = id;
         this.title = title;
         this.description = description;
-        this.descriptionVector = descriptionVector;
         this.department = department;
         this.location = location;
         this.experienceLevel = experienceLevel;
@@ -99,8 +95,6 @@ public class JobPosting {
     public void setTitle(String title) { this.title = title; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
-    public float[] getDescriptionVector() { return descriptionVector; }
-    public void setDescriptionVector(float[] descriptionVector) { this.descriptionVector = descriptionVector; }
     public String getDepartment() { return department; }
     public void setDepartment(String department) { this.department = department; }
     public String getLocation() { return location; }

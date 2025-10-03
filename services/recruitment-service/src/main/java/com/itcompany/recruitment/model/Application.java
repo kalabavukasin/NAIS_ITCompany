@@ -23,9 +23,6 @@ public class Application {
     @Field(type = FieldType.Text)
     private String coverLetter;
 
-    @Field(type = FieldType.Dense_Vector, dims = 768)
-    private float[] coverLetterVector;
-
     @Field(type = FieldType.Double)
     private Double overallMatchScore;
 
@@ -56,7 +53,7 @@ public class Application {
     public Application() {}
 
     public Application(String id, String candidateId, String jobPostingId, LocalDateTime applicationDate,
-                       String status, String coverLetter, float[] coverLetterVector, Double overallMatchScore,
+                       String status, String coverLetter, Double overallMatchScore,
                        Double skillMatchScore, Double experienceMatchScore, Double cvMatchScore, Integer ranking,
                        String hrNotes, String reviewedBy, LocalDateTime reviewDate, Boolean isShortlisted) {
         this.id = id;
@@ -65,7 +62,6 @@ public class Application {
         this.applicationDate = applicationDate;
         this.status = status;
         this.coverLetter = coverLetter;
-        this.coverLetterVector = coverLetterVector;
         this.overallMatchScore = overallMatchScore;
         this.skillMatchScore = skillMatchScore;
         this.experienceMatchScore = experienceMatchScore;
@@ -89,8 +85,6 @@ public class Application {
     public void setStatus(String status) { this.status = status; }
     public String getCoverLetter() { return coverLetter; }
     public void setCoverLetter(String coverLetter) { this.coverLetter = coverLetter; }
-    public float[] getCoverLetterVector() { return coverLetterVector; }
-    public void setCoverLetterVector(float[] coverLetterVector) { this.coverLetterVector = coverLetterVector; }
     public Double getOverallMatchScore() { return overallMatchScore; }
     public void setOverallMatchScore(Double overallMatchScore) { this.overallMatchScore = overallMatchScore; }
     public Double getSkillMatchScore() { return skillMatchScore; }

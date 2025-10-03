@@ -3,6 +3,9 @@ package com.itcompany.recruitment.service;
 import com.itcompany.recruitment.model.Application;
 import com.itcompany.recruitment.model.Candidate;
 import com.itcompany.recruitment.model.JobPosting;
+import com.itcompany.recruitment.model.qdrant.ApplicationVector;
+import com.itcompany.recruitment.model.qdrant.CandidateVector;
+import com.itcompany.recruitment.model.qdrant.JobPostingVector;
 import com.itcompany.recruitment.repository.ApplicationRepository;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -18,18 +21,22 @@ public class ApplicationService {
     private final CandidateService candidateService;
     private final JobPostingService jobPostingService;
     private final VectorizationService vectorizationService;
+    private final QdrantService qdrantService;
+    
     public ApplicationService(ApplicationRepository applicationRepository,
                              CandidateService candidateService,
                              JobPostingService jobPostingService,
-                             VectorizationService vectorizationService) {
+                             VectorizationService vectorizationService,
+                             QdrantService qdrantService) {
         this.applicationRepository = applicationRepository;
         this.candidateService = candidateService;
         this.jobPostingService = jobPostingService;
         this.vectorizationService = vectorizationService;
+        this.qdrantService = qdrantService;
     }
     
     public Application submitApplication(Application application) {
-        // Proveri da li kandidat već ima prijavu za ovaj posao
+        // Check if candidate already applied for this position
         Application existing = applicationRepository.findByCandidateIdAndJobPostingId(
             application.getCandidateId(), 
             application.getJobPostingId()
@@ -39,20 +46,44 @@ public class ApplicationService {
             throw new IllegalStateException("Candidate already applied for this position");
         }
         
-        // Vektorizuj cover letter ako postoji
-        if (application.getCoverLetter() != null) {
-            application.setCoverLetterVector(
-                vectorizationService.vectorizeText(application.getCoverLetter())
-            );
-        }
-        
-        // Izračunaj match skorove
+        // Calculate match scores
         calculateMatchScores(application);
         
         application.setApplicationDate(LocalDateTime.now());
         application.setStatus("PENDING");
         
-        return applicationRepository.save(application);
+        // Save to Elasticsearch (without vectors)
+        Application savedApplication = applicationRepository.save(application);
+        
+        // Create and store vectors in Qdrant
+        if (application.getCoverLetter() != null && !application.getCoverLetter().trim().isEmpty()) {
+            try {
+                float[] coverLetterVector = vectorizationService.vectorizeText(application.getCoverLetter());
+                
+                // Check if vector is valid
+                if (coverLetterVector != null && coverLetterVector.length > 0) {
+                    ApplicationVector applicationVector = new ApplicationVector(
+                        savedApplication.getId(),
+                        coverLetterVector,
+                        application.getCoverLetter(),
+                        application.getCandidateId(),
+                        application.getJobPostingId()
+                    );
+                    
+                    qdrantService.storeApplicationVector(applicationVector);
+                    logger.info("Successfully stored application vectors for ID: {}", savedApplication.getId());
+                } else {
+                    logger.warn("Empty vector generated for application ID: {}, skipping Qdrant storage", savedApplication.getId());
+                }
+                
+            } catch (Exception e) {
+                logger.error("Error storing application vectors for ID: {}", savedApplication.getId(), e);
+            }
+        } else {
+            logger.warn("No cover letter provided for application ID: {}, skipping Qdrant storage", savedApplication.getId());
+        }
+        
+        return savedApplication;
     }
     
     private void calculateMatchScores(Application application) {
@@ -63,13 +94,30 @@ public class ApplicationService {
             Candidate candidate = candidateOpt.get();
             JobPosting job = jobOpt.get();
             
-            // CV Match Score (vektorska sličnost)
-            if (candidate.getCvVector() != null && job.getDescriptionVector() != null) {
-                double cvScore = vectorizationService.calculateCosineSimilarity(
-                    candidate.getCvVector(), 
-                    job.getDescriptionVector()
-                );
-                application.setCvMatchScore(cvScore);
+            // CV Match Score (vector similarity using Qdrant)
+            try {
+                // Get candidate CV vector from Qdrant
+                List<CandidateVector> candidateVectors = qdrantService.searchSimilarCandidates(
+                    vectorizationService.vectorizeText(candidate.getCvContent()), 1);
+                
+                // Get job description vector from Qdrant
+                List<JobPostingVector> jobVectors = qdrantService.searchSimilarJobPostings(
+                    vectorizationService.vectorizeText(job.getDescription()), 1);
+                
+                if (!candidateVectors.isEmpty() && !jobVectors.isEmpty()) {
+                    // Calculate similarity using Qdrant vectors
+                    float[] cvVector = candidateVectors.get(0).getCvVector();
+                    float[] jobVector = jobVectors.get(0).getDescriptionVector();
+                    
+                    if (cvVector != null && jobVector != null) {
+                        double cvScore = vectorizationService.calculateCosineSimilarity(cvVector, jobVector);
+                        application.setCvMatchScore(cvScore);
+                    } else {
+                        logger.warn("Null vectors found for application: {}, skipping CV match calculation", application.getId());
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error calculating CV match score for application: {}", application.getId(), e);
             }
             
             // Skill Match Score
@@ -143,14 +191,14 @@ public class ApplicationService {
     public List<Application> generateShortlist(String jobPostingId, int topN) {
         List<Application> applications = applicationRepository.findByJobPostingId(jobPostingId);
         
-        // Sortiraj po overall match score
+        // Sort by overall match score
         applications.sort((a, b) -> {
             Double scoreA = a.getOverallMatchScore() != null ? a.getOverallMatchScore() : 0.0;
             Double scoreB = b.getOverallMatchScore() != null ? b.getOverallMatchScore() : 0.0;
             return scoreB.compareTo(scoreA);
         });
         
-        // Uzmi top N i označi kao shortlisted
+        // Get top N and mark as shortlisted
         List<Application> shortlist = applications.stream()
             .limit(topN)
             .collect(Collectors.toList());
@@ -176,7 +224,7 @@ public class ApplicationService {
         
         List<Application> applications = applicationRepository.findByJobPostingId(jobPostingId);
         
-        // Prosečni skorovi
+        // Average scores
         double avgOverallScore = applications.stream()
             .filter(a -> a.getOverallMatchScore() != null)
             .mapToDouble(Application::getOverallMatchScore)

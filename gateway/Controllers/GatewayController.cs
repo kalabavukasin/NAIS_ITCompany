@@ -36,21 +36,21 @@ public class GatewayController : ControllerBase
     }
 
     [HttpGet("recruitment/job-postings/{id}")]
-    public async Task<IActionResult> GetJobPosting(long id)
+    public async Task<IActionResult> GetJobPosting(string id)
     {
         return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Get);
     }
 
     [HttpPut("recruitment/job-postings/{id}")]
     [Authorize]
-    public async Task<IActionResult> UpdateJobPosting(long id)
+    public async Task<IActionResult> UpdateJobPosting(string id)
     {
         return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Put, includeAuth: true);
     }
 
     [HttpDelete("recruitment/job-postings/{id}")]
     [Authorize]
-    public async Task<IActionResult> DeleteJobPosting(long id)
+    public async Task<IActionResult> DeleteJobPosting(string id)
     {
         return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Delete, includeAuth: true);
     }
@@ -69,21 +69,21 @@ public class GatewayController : ControllerBase
     }
 
     [HttpGet("recruitment/candidates/{id}")]
-    public async Task<IActionResult> GetCandidate(long id)
+    public async Task<IActionResult> GetCandidate(string id)
     {
         return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Get);
     }
 
     [HttpPut("recruitment/candidates/{id}")]
     [Authorize]
-    public async Task<IActionResult> UpdateCandidate(long id)
+    public async Task<IActionResult> UpdateCandidate(string id)
     {
         return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Put, includeAuth: true);
     }
 
     [HttpDelete("recruitment/candidates/{id}")]
     [Authorize]
-    public async Task<IActionResult> DeleteCandidate(long id)
+    public async Task<IActionResult> DeleteCandidate(string id)
     {
         return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Delete, includeAuth: true);
     }
@@ -104,30 +104,30 @@ public class GatewayController : ControllerBase
 
     [HttpGet("recruitment/applications/{id}")]
     [Authorize]
-    public async Task<IActionResult> GetApplication(long id)
+    public async Task<IActionResult> GetApplication(string id)
     {
         return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Get, includeAuth: true);
     }
 
     [HttpPut("recruitment/applications/{id}")]
     [Authorize]
-    public async Task<IActionResult> UpdateApplication(long id)
+    public async Task<IActionResult> UpdateApplication(string id)
     {
         return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Put, includeAuth: true);
     }
 
     [HttpDelete("recruitment/applications/{id}")]
     [Authorize]
-    public async Task<IActionResult> DeleteApplication(long id)
+    public async Task<IActionResult> DeleteApplication(string id)
     {
         return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Delete, includeAuth: true);
     }
 
     // Recruitment service endpoints - Search and Analytics
-    [HttpPost("recruitment/search/candidates")]
+    [HttpPost("recruitment/candidates/search")]
     public async Task<IActionResult> SearchCandidates()
     {
-        return await ForwardRequest("recruitment", "api/search/candidates", HttpMethod.Post);
+        return await ForwardRequest("recruitment", "api/candidates/search", HttpMethod.Post);
     }
 
     [HttpPost("recruitment/search/jobs")]
@@ -136,11 +136,31 @@ public class GatewayController : ControllerBase
         return await ForwardRequest("recruitment", "api/search/jobs", HttpMethod.Post);
     }
 
-    [HttpPost("recruitment/vector-search/candidates")]
+   /* [HttpPost("recruitment/vector-search/candidates")]
     public async Task<IActionResult> VectorSearchCandidates()
     {
-        return await ForwardRequest("recruitment", "api/vector-search/candidates", HttpMethod.Post);
+        return await ForwardRequest("recruitment", "api/candidates/hybrid-search", HttpMethod.Post);
+    }*/
+
+    // Complex search endpoints for Elasticsearch testing
+    [HttpPost("recruitment/candidates/hybrid-search")]
+    public async Task<IActionResult> HybridSearchCandidates()
+    {
+        return await ForwardRequest("recruitment", "api/candidates/hybrid-search", HttpMethod.Post);
     }
+
+    [HttpPost("recruitment/candidates/search-with-vector")]
+    public async Task<IActionResult> SearchCandidatesWithVector()
+    {
+        return await ForwardRequest("recruitment", "api/candidates/search-with-vector", HttpMethod.Post);
+    }
+
+    [HttpPost("recruitment/jobs/search")]
+    public async Task<IActionResult> SearchJobsWithFilters()
+    {
+        return await ForwardRequest("recruitment", "api/jobs/search", HttpMethod.Post);
+    }
+
 
     [HttpGet("recruitment/analytics/statistics")]
     [Authorize]
@@ -164,6 +184,12 @@ public class GatewayController : ControllerBase
                 {
                     content = new StringContent(body, Encoding.UTF8, "application/json");
                 }
+            }
+
+            // Add query parameters to path
+            if (Request.QueryString.HasValue)
+            {
+                path += Request.QueryString.Value;
             }
 
             string? authToken = null;

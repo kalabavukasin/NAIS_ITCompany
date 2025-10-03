@@ -22,8 +22,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Transakciona obrada podataka za Candidate entitet
- * Implementira Saga pattern (orkestracija) za čuvanje u Elasticsearch i Qdrant
+ * Transactional processing of data for Candidate entity
+ * Implements Saga pattern (orchestration) for saving to Elasticsearch and Qdrant
  */
 @Service
 public class TransactionalCandidateService {
@@ -44,11 +44,11 @@ public class TransactionalCandidateService {
     private String qdrantUrl;
 
     /**
-     * SAGA STEP 1: Kreiranje kandidata sa transakcionom obradom
-     * 1. Vektorizacija
-     * 2. Čuvanje u Elasticsearch
-     * 3. Čuvanje u Qdrant
-     * 4. Rollback ako nešto ne uspe
+     * SAGA STEP 1: Create candidate with transactional processing
+     * 1. Vectorize
+     * 2. Save to Elasticsearch
+     * 3. Save to Qdrant
+     * 4. Rollback if something fails
      */
     @Transactional
     public Candidate createCandidate(Candidate candidate) {
@@ -57,23 +57,21 @@ public class TransactionalCandidateService {
         try {
             logger.info("Starting transactional creation of candidate: {}", candidate.getEmail());
             
-            // STEP 1: Vektorizacija
+            // STEP 1: Vectors will be created when saving to Qdrant
             if (candidate.getCvContent() != null) {
-                candidate.setCvVector(vectorizationService.vectorizeText(candidate.getCvContent()));
-                logger.debug("CV vectorized successfully");
+                logger.debug("CV will be vectorized when saving to Qdrant");
             }
             if (candidate.getSkills() != null) {
-                candidate.setSkillsVector(vectorizationService.vectorizeSkills(candidate.getSkills()));
-                logger.debug("Skills vectorized successfully");
+                logger.debug("Skills will be vectorized when saving to Qdrant");
             }
             candidate.setRegistrationDate(LocalDateTime.now());
             
-            // STEP 2: Čuvanje u Elasticsearch (glavna baza)
+            // STEP 2: Save to Elasticsearch (main database)
             Candidate savedCandidate = candidateRepository.save(candidate);
             candidateId = savedCandidate.getId();
             logger.info("Candidate saved to Elasticsearch with ID: {}", candidateId);
             
-            // STEP 3: Čuvanje u Qdrant (vektorska baza)
+            // STEP 3: Save to Qdrant (vector database)
             saveToQdrant(savedCandidate);
             logger.info("Candidate saved to Qdrant successfully");
             
@@ -98,33 +96,33 @@ public class TransactionalCandidateService {
     }
 
     /**
-     * SAGA STEP 2: Ažuriranje kandidata sa transakcionom obradom
+     * SAGA STEP 2: Update candidate with transactional processing
      */
     @Transactional
     public Candidate updateCandidate(String id, Candidate candidate) {
         try {
             logger.info("Starting transactional update of candidate: {}", id);
             
-            // STEP 1: Proveri da li kandidat postoji
+            // STEP 1: Check if candidate exists
             Optional<Candidate> existingOpt = candidateRepository.findById(id);
             if (existingOpt.isEmpty()) {
                 throw new IllegalArgumentException("Candidate not found: " + id);
             }
             
-            // STEP 2: Vektorizacija (ako su promenjeni CV ili skills)
+            // STEP 2: Vectors will be created when saving to Qdrant (if CV or skills are changed)
             if (candidate.getCvContent() != null) {
-                candidate.setCvVector(vectorizationService.vectorizeText(candidate.getCvContent()));
+                logger.debug("CV will be vectorized when saving to Qdrant");
             }
             if (candidate.getSkills() != null) {
-                candidate.setSkillsVector(vectorizationService.vectorizeSkills(candidate.getSkills()));
+                logger.debug("Skills will be vectorized when saving to Qdrant");
             }
             candidate.setId(id);
             
-            // STEP 3: Ažuriranje u Elasticsearch
+            // STEP 3: Update in Elasticsearch
             Candidate updatedCandidate = candidateRepository.save(candidate);
             logger.info("Candidate updated in Elasticsearch: {}", id);
             
-            // STEP 4: Ažuriranje u Qdrant
+            // STEP 4: Update in Qdrant
             updateInQdrant(updatedCandidate);
             logger.info("Candidate updated in Qdrant: {}", id);
             
@@ -138,24 +136,24 @@ public class TransactionalCandidateService {
     }
 
     /**
-     * SAGA STEP 3: Brisanje kandidata sa transakcionom obradom
+     * SAGA STEP 3: Delete candidate with transactional processing
      */
     @Transactional
     public void deleteCandidate(String id) {
         try {
             logger.info("Starting transactional deletion of candidate: {}", id);
             
-            // STEP 1: Proveri da li kandidat postoji
+            // STEP 1: Check if candidate exists
             Optional<Candidate> existingOpt = candidateRepository.findById(id);
             if (existingOpt.isEmpty()) {
                 throw new IllegalArgumentException("Candidate not found: " + id);
             }
             
-            // STEP 2: Brisanje iz Qdrant
+            // STEP 2: Delete from Qdrant
             deleteFromQdrant(id);
             logger.info("Candidate deleted from Qdrant: {}", id);
             
-            // STEP 3: Brisanje iz Elasticsearch
+            // STEP 3: Delete from Elasticsearch
             candidateRepository.deleteById(id);
             logger.info("Candidate deleted from Elasticsearch: {}", id);
             
@@ -168,7 +166,7 @@ public class TransactionalCandidateService {
     }
 
     /**
-     * Čuvanje kandidata u Qdrant
+     * Save candidate to Qdrant
      */
     private void saveToQdrant(Candidate candidate) {
         try {
@@ -176,9 +174,14 @@ public class TransactionalCandidateService {
             
             Map<String, Object> point = new HashMap<>();
             point.put("id", candidate.getId());
-            point.put("vector", candidate.getCvVector()); // Koristi CV vektor
+            // Combine CV and skills vectors
+            float[] combinedVector = combineVectors(
+                vectorizationService.vectorizeText(candidate.getCvContent()),
+                candidate.getSkills() != null ? vectorizationService.vectorizeSkills(candidate.getSkills()) : new float[384]
+            );
+            point.put("vector", combinedVector);
             
-            // Minimalni payload za Qdrant
+            // Minimal payload for Qdrant
             Map<String, Object> payload = new HashMap<>();
             payload.put("id", candidate.getId());
             payload.put("name", candidate.getFirstName() + " " + candidate.getLastName());
@@ -208,7 +211,7 @@ public class TransactionalCandidateService {
     }
 
     /**
-     * Ažuriranje kandidata u Qdrant
+     * Update candidate in Qdrant
      */
     private void updateInQdrant(Candidate candidate) {
         try {
@@ -216,9 +219,14 @@ public class TransactionalCandidateService {
             
             Map<String, Object> point = new HashMap<>();
             point.put("id", candidate.getId());
-            point.put("vector", candidate.getCvVector());
+            // Combine CV and skills vectors
+            float[] combinedVector = combineVectors(
+                vectorizationService.vectorizeText(candidate.getCvContent()),
+                candidate.getSkills() != null ? vectorizationService.vectorizeSkills(candidate.getSkills()) : new float[384]
+            );
+            point.put("vector", combinedVector);
             
-            // Minimalni payload za Qdrant
+            // Minimal payload for Qdrant
             Map<String, Object> payload = new HashMap<>();
             payload.put("id", candidate.getId());
             payload.put("name", candidate.getFirstName() + " " + candidate.getLastName());
@@ -248,7 +256,7 @@ public class TransactionalCandidateService {
     }
 
     /**
-     * Brisanje kandidata iz Qdrant
+     * Delete candidate from Qdrant
      */
     private void deleteFromQdrant(String candidateId) {
         try {
@@ -269,4 +277,23 @@ public class TransactionalCandidateService {
             throw new RuntimeException("Failed to delete candidate from Qdrant", e);
         }
     }
+    
+    /**
+     * Combine CV and skills vectors into a single vector
+     */
+    private float[] combineVectors(float[] vector1, float[] vector2) {
+        if (vector1 == null && vector2 == null) return new float[384];
+        if (vector1 == null) return vector2;
+        if (vector2 == null) return vector1;
+        
+        float[] combined = new float[384];
+        int half = 192;
+        
+        // First half from vector1, second half from vector2
+        System.arraycopy(vector1, 0, combined, 0, Math.min(half, vector1.length));
+        System.arraycopy(vector2, 0, combined, half, Math.min(half, vector2.length));
+        
+        return combined;
+    }
 }
+

@@ -30,14 +30,8 @@ public class Candidate {
     @Field(type = FieldType.Text, analyzer = "standard")
     private String cvContent;
 
-    @Field(type = FieldType.Dense_Vector, dims = 768)
-    private float[] cvVector;
-
     @Field(type = FieldType.Keyword)
     private List<String> skills;
-
-    @Field(type = FieldType.Dense_Vector, dims = 768)
-    private float[] skillsVector;
 
     @Field(type = FieldType.Integer)
     private Integer yearsOfExperience;
@@ -81,8 +75,7 @@ public class Candidate {
     public Candidate() {}
 
     public Candidate(String id, String firstName, String lastName, String email, String phone, String location,
-                     String cvContent, float[] cvVector, List<String> skills, float[] skillsVector,
-                     Integer yearsOfExperience, List<WorkExperience> workExperiences,
+                     String cvContent, List<String> skills, Integer yearsOfExperience, List<WorkExperience> workExperiences,
                      List<Education> educationHistory, List<String> certifications, String currentPosition,
                      Double expectedSalary, String preferredEmploymentType, Boolean willingToRelocate,
                      LocalDate dateOfBirth, String linkedinProfile, String githubProfile, Double matchScore,
@@ -94,9 +87,7 @@ public class Candidate {
         this.phone = phone;
         this.location = location;
         this.cvContent = cvContent;
-        this.cvVector = cvVector;
         this.skills = skills;
-        this.skillsVector = skillsVector;
         this.yearsOfExperience = yearsOfExperience;
         this.workExperiences = workExperiences;
         this.educationHistory = educationHistory;
@@ -126,12 +117,8 @@ public class Candidate {
     public void setLocation(String location) { this.location = location; }
     public String getCvContent() { return cvContent; }
     public void setCvContent(String cvContent) { this.cvContent = cvContent; }
-    public float[] getCvVector() { return cvVector; }
-    public void setCvVector(float[] cvVector) { this.cvVector = cvVector; }
     public List<String> getSkills() { return skills; }
     public void setSkills(List<String> skills) { this.skills = skills; }
-    public float[] getSkillsVector() { return skillsVector; }
-    public void setSkillsVector(float[] skillsVector) { this.skillsVector = skillsVector; }
     public Integer getYearsOfExperience() { return yearsOfExperience; }
     public void setYearsOfExperience(Integer yearsOfExperience) { this.yearsOfExperience = yearsOfExperience; }
     public List<WorkExperience> getWorkExperiences() { return workExperiences; }

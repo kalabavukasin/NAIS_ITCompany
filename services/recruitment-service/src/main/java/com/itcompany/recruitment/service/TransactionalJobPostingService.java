@@ -22,8 +22,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Transakciona obrada podataka za JobPosting entitet
- * Implementira Saga pattern (orkestracija) za čuvanje u Elasticsearch i Qdrant
+ * Transactional processing of data for JobPosting entity
+ * Implements Saga pattern (orchestration) for saving to Elasticsearch and Qdrant
  */
 @Service
 public class TransactionalJobPostingService {
@@ -44,7 +44,7 @@ public class TransactionalJobPostingService {
     private String qdrantUrl;
 
     /**
-     * SAGA STEP 1: Kreiranje job posting-a sa transakcionom obradom
+     * SAGA STEP 1: Create job posting with transactional processing
      */
     @Transactional
     public JobPosting createJobPosting(JobPosting jobPosting) {
@@ -53,24 +53,21 @@ public class TransactionalJobPostingService {
         try {
             logger.info("Starting transactional creation of job posting: {}", jobPosting.getTitle());
             
-            // STEP 1: Vektorizacija
+            // STEP 1: Vector will be created when saving to Qdrant
             if (jobPosting.getDescription() != null) {
-                jobPosting.setDescriptionVector(
-                    vectorizationService.vectorizeText(jobPosting.getDescription())
-                );
-                logger.debug("Job description vectorized successfully");
+                logger.debug("Job description will be vectorized when saving to Qdrant");
             }
             jobPosting.setPostedDate(LocalDateTime.now());
             if (jobPosting.getIsActive() == null) {
                 jobPosting.setIsActive(true);
             }
             
-            // STEP 2: Čuvanje u Elasticsearch (glavna baza)
+            // STEP 2: Save to Elasticsearch (main database)
             JobPosting savedJob = jobPostingRepository.save(jobPosting);
             jobId = savedJob.getId();
             logger.info("Job posting saved to Elasticsearch with ID: {}", jobId);
             
-            // STEP 3: Čuvanje u Qdrant (vektorska baza)
+            // STEP 3: Save to Qdrant (vector database)
             saveToQdrant(savedJob);
             logger.info("Job posting saved to Qdrant successfully");
             
@@ -95,32 +92,30 @@ public class TransactionalJobPostingService {
     }
 
     /**
-     * SAGA STEP 2: Ažuriranje job posting-a sa transakcionom obradom
+     * SAGA STEP 2: Update job posting with transactional processing
      */
     @Transactional
     public JobPosting updateJobPosting(String id, JobPosting jobPosting) {
         try {
             logger.info("Starting transactional update of job posting: {}", id);
             
-            // STEP 1: Proveri da li job posting postoji
+            // STEP 1: Check if job posting exists
             Optional<JobPosting> existingOpt = jobPostingRepository.findById(id);
             if (existingOpt.isEmpty()) {
                 throw new IllegalArgumentException("Job posting not found: " + id);
             }
             
-            // STEP 2: Vektorizacija (ako je promenjen opis)
+            // STEP 2: Vector will be created when saving to Qdrant (if description is changed)
             if (jobPosting.getDescription() != null) {
-                jobPosting.setDescriptionVector(
-                    vectorizationService.vectorizeText(jobPosting.getDescription())
-                );
+                logger.debug("Job description will be vectorized when saving to Qdrant");
             }
             jobPosting.setId(id);
             
-            // STEP 3: Ažuriranje u Elasticsearch
+            // STEP 3: Update in Elasticsearch
             JobPosting updatedJob = jobPostingRepository.save(jobPosting);
             logger.info("Job posting updated in Elasticsearch: {}", id);
             
-            // STEP 4: Ažuriranje u Qdrant
+            // STEP 4: Update in Qdrant
             updateInQdrant(updatedJob);
             logger.info("Job posting updated in Qdrant: {}", id);
             
@@ -134,24 +129,24 @@ public class TransactionalJobPostingService {
     }
 
     /**
-     * SAGA STEP 3: Brisanje job posting-a sa transakcionom obradom
+     * SAGA STEP 3: Delete job posting with transactional processing
      */
     @Transactional
     public void deleteJobPosting(String id) {
         try {
             logger.info("Starting transactional deletion of job posting: {}", id);
             
-            // STEP 1: Proveri da li job posting postoji
+            // STEP 1: Check if job posting exists
             Optional<JobPosting> existingOpt = jobPostingRepository.findById(id);
             if (existingOpt.isEmpty()) {
                 throw new IllegalArgumentException("Job posting not found: " + id);
             }
             
-            // STEP 2: Brisanje iz Qdrant
+            // STEP 2: Delete from Qdrant
             deleteFromQdrant(id);
             logger.info("Job posting deleted from Qdrant: {}", id);
             
-            // STEP 3: Brisanje iz Elasticsearch
+            // STEP 3: Delete from Elasticsearch
             jobPostingRepository.deleteById(id);
             logger.info("Job posting deleted from Elasticsearch: {}", id);
             
@@ -164,7 +159,7 @@ public class TransactionalJobPostingService {
     }
 
     /**
-     * Čuvanje job posting-a u Qdrant
+     * Save job posting to Qdrant
      */
     private void saveToQdrant(JobPosting jobPosting) {
         try {
@@ -172,9 +167,9 @@ public class TransactionalJobPostingService {
             
             Map<String, Object> point = new HashMap<>();
             point.put("id", jobPosting.getId());
-            point.put("vector", jobPosting.getDescriptionVector()); // Koristi description vektor
+            point.put("vector", vectorizationService.vectorizeText(jobPosting.getDescription()));
             
-            // Minimalni payload za Qdrant
+            // Minimal payload for Qdrant
             Map<String, Object> payload = new HashMap<>();
             payload.put("id", jobPosting.getId());
             payload.put("title", jobPosting.getTitle());
@@ -207,7 +202,7 @@ public class TransactionalJobPostingService {
     }
 
     /**
-     * Ažuriranje job posting-a u Qdrant
+     * Update job posting in Qdrant
      */
     private void updateInQdrant(JobPosting jobPosting) {
         try {
@@ -215,9 +210,9 @@ public class TransactionalJobPostingService {
             
             Map<String, Object> point = new HashMap<>();
             point.put("id", jobPosting.getId());
-            point.put("vector", jobPosting.getDescriptionVector());
+            point.put("vector", vectorizationService.vectorizeText(jobPosting.getDescription()));
             
-            // Minimalni payload za Qdrant
+            // Minimal payload for Qdrant
             Map<String, Object> payload = new HashMap<>();
             payload.put("id", jobPosting.getId());
             payload.put("title", jobPosting.getTitle());
@@ -250,7 +245,7 @@ public class TransactionalJobPostingService {
     }
 
     /**
-     * Brisanje job posting-a iz Qdrant
+     * Delete job posting from Qdrant
      */
     private void deleteFromQdrant(String jobId) {
         try {

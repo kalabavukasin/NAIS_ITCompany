@@ -41,13 +41,34 @@ public class DatabaseSetupService {
     public void initializeDatabases() {
         logger.info("Starting database initialization...");
         
-        try {
-            setupQdrantCollections();
-            setupElasticsearchIndices();
-            logger.info("Database initialization completed successfully!");
-        } catch (Exception e) {
-            logger.error("Error during database initialization: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to initialize databases", e);
+        int maxRetries = 5;
+        int retryDelay = 3000; // 3 seconds
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                logger.info("Database initialization attempt {} of {}", attempt, maxRetries);
+                
+                setupQdrantCollections();
+                setupElasticsearchIndices();
+                
+                logger.info("Database initialization completed successfully!");
+                return;
+            } catch (Exception e) {
+                logger.warn("Database initialization attempt {} failed: {}", attempt, e.getMessage());
+                
+                if (attempt < maxRetries) {
+                    try {
+                        logger.info("Retrying in {} seconds...", retryDelay / 1000);
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Database initialization interrupted", ie);
+                    }
+                } else {
+                    logger.error("Database initialization failed after {} attempts", maxRetries);
+                    throw new RuntimeException("Failed to initialize databases after " + maxRetries + " attempts", e);
+                }
+            }
         }
     }
 
@@ -55,13 +76,13 @@ public class DatabaseSetupService {
         logger.info("Setting up Qdrant collections...");
         
         // Setup candidates collection
-        createQdrantCollection("candidates", 768);
+        createQdrantCollection("candidates", 384);
         
         // Setup job_advertisements collection
-        createQdrantCollection("job_advertisements", 768);
+        createQdrantCollection("job_advertisements", 384);
         
         // Setup applications collection
-        createQdrantCollection("applications", 768);
+        createQdrantCollection("applications", 384);
         
         logger.info("Qdrant collections created successfully!");
     }
@@ -98,73 +119,10 @@ public class DatabaseSetupService {
     private void setupElasticsearchIndices() {
         logger.info("Setting up Elasticsearch indices...");
         
-        // Setup candidates index
-        createElasticsearchIndex("candidates", getCandidatesMapping());
+        // Let Spring Data Elasticsearch automatically create indices based on @Document models
+        // This ensures proper mapping with vector fields
         
-        // Setup job_advertisements index
-        createElasticsearchIndex("job_advertisements", getJobAdvertisementsMapping());
-        
-        logger.info("Elasticsearch indices created successfully!");
+        logger.info("Elasticsearch indices will be created automatically by Spring Data Elasticsearch!");
     }
 
-    private void createElasticsearchIndex(String indexName, Map<String, Object> mapping) {
-        try {
-            String url = elasticsearchUrl + "/" + indexName;
-            
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(mapping, headers);
-            
-            ResponseEntity<String> response = elasticsearchRestTemplate.exchange(
-                url, HttpMethod.PUT, request, String.class);
-            
-            if (response.getStatusCode().is2xxSuccessful()) {
-                logger.info("Created Elasticsearch index: {}", indexName);
-            } else {
-                logger.warn("Index {} might already exist or failed to create: {}", 
-                    indexName, response.getStatusCode());
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to create index {}: {}", indexName, e.getMessage());
-        }
-    }
-
-    private Map<String, Object> getCandidatesMapping() {
-        Map<String, Object> mapping = new HashMap<>();
-        Map<String, Object> properties = new HashMap<>();
-        
-        properties.put("name", Map.of("type", "text"));
-        properties.put("email", Map.of("type", "keyword"));
-        properties.put("phone", Map.of("type", "keyword"));
-        properties.put("skills", Map.of("type", "text"));
-        properties.put("experience", Map.of("type", "integer"));
-        properties.put("location", Map.of("type", "keyword"));
-        properties.put("cv_content", Map.of("type", "text"));
-        properties.put("education", Map.of("type", "text"));
-        properties.put("languages", Map.of("type", "keyword"));
-        properties.put("created_at", Map.of("type", "date"));
-        
-        mapping.put("mappings", Map.of("properties", properties));
-        return mapping;
-    }
-
-    private Map<String, Object> getJobAdvertisementsMapping() {
-        Map<String, Object> mapping = new HashMap<>();
-        Map<String, Object> properties = new HashMap<>();
-        
-        properties.put("title", Map.of("type", "text"));
-        properties.put("description", Map.of("type", "text"));
-        properties.put("requirements", Map.of("type", "text"));
-        properties.put("location", Map.of("type", "keyword"));
-        properties.put("salary_min", Map.of("type", "integer"));
-        properties.put("salary_max", Map.of("type", "integer"));
-        properties.put("company", Map.of("type", "keyword"));
-        properties.put("employment_type", Map.of("type", "keyword"));
-        properties.put("experience_level", Map.of("type", "keyword"));
-        properties.put("created_at", Map.of("type", "date"));
-        
-        mapping.put("mappings", Map.of("properties", properties));
-        return mapping;
-    }
 }

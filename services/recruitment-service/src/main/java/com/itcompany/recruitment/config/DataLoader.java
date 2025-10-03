@@ -35,28 +35,109 @@ public class DataLoader {
 
     @EventListener
     public void handleContextRefresh(ContextRefreshedEvent event) {
-        // Dodajemo delay da se baze podataka inicijalizuju
+        // Adding delay to wait for databases to initialize
         new Thread(() -> {
             try {
                 logger.info("Waiting for databases to initialize...");
-                Thread.sleep(10000); // 10 sekundi delay
+                Thread.sleep(15000); // 15 seconds delay for better stability
                 
                 logger.info("Starting data loading...");
                 
-                // Kreiraj job postings
-                createJobPostings();
+                // Create job postings with retry logic
+                createJobPostingsWithRetry();
                 
-                // Kreiraj kandidate
-                createCandidates();
+                // Create candidates with retry logic
+                createCandidatesWithRetry();
                 
-                // Kreiraj prijave
-                createApplications();
+                // Create applications with retry logic
+                createApplicationsWithRetry();
                 
-                logger.info("Data loading completed!");
+                logger.info("Data loading completed successfully!");
             } catch (Exception e) {
                 logger.error("Error during data loading: ", e);
             }
         }).start();
+    }
+
+    private void createJobPostingsWithRetry() {
+        int maxRetries = 3;
+        int retryDelay = 5000; // 5 seconds
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                logger.info("Creating job postings (attempt {})...", attempt);
+                createJobPostings();
+                logger.info("Job postings created successfully!");
+                return;
+            } catch (Exception e) {
+                logger.warn("Failed to create job postings (attempt {}): {}", attempt, e.getMessage());
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                } else {
+                    logger.error("Failed to create job postings after {} attempts", maxRetries);
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private void createCandidatesWithRetry() {
+        int maxRetries = 3;
+        int retryDelay = 5000; // 5 seconds
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                logger.info("Creating candidates (attempt {})...", attempt);
+                createCandidates();
+                logger.info("Candidates created successfully!");
+                return;
+            } catch (Exception e) {
+                logger.warn("Failed to create candidates (attempt {}): {}", attempt, e.getMessage());
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                } else {
+                    logger.error("Failed to create candidates after {} attempts", maxRetries);
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private void createApplicationsWithRetry() {
+        int maxRetries = 3;
+        int retryDelay = 5000; // 5 seconds
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                logger.info("Creating applications (attempt {})...", attempt);
+                createApplications();
+                logger.info("Applications created successfully!");
+                return;
+            } catch (Exception e) {
+                logger.warn("Failed to create applications (attempt {}): {}", attempt, e.getMessage());
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                } else {
+                    logger.error("Failed to create applications after {} attempts", maxRetries);
+                    throw e;
+                }
+            }
+        }
     }
 
     private void createJobPostings() {
@@ -138,7 +219,7 @@ public class DataLoader {
     private void createApplications() {
         logger.info("Creating applications...");
         
-        // Uzmi sve job postings i kandidate
+        // Get all job postings and candidates
         var jobPostings = jobPostingService.findAll();
         var candidates = candidateService.findAll();
         
@@ -159,7 +240,7 @@ public class DataLoader {
             try {
                 applicationService.submitApplication(application);
             } catch (Exception e) {
-                // Ignoriši duplikate
+                // Ignore duplicates
                 logger.debug("Skipping duplicate application: " + e.getMessage());
             }
         }

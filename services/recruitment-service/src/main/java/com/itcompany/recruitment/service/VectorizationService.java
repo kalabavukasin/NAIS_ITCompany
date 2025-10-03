@@ -12,29 +12,29 @@ public class VectorizationService {
 
     private static final Logger log = LoggerFactory.getLogger(VectorizationService.class);
 
-    private static final int VECTOR_DIMENSION = 768; // Standardna dimenzija
+    private static final int VECTOR_DIMENSION = 384; // Standardna dimenzija
     private final Map<String, float[]> wordVectors = new HashMap<>();
 
     public VectorizationService() {
         initializeCommonWords();
     }
     /**
-     * Vektorizuje tekst koristeći lokalnu TF-IDF baziranu metodu
-     * BEZ KORIŠĆENJA AI SERVISA
+     * Vectorize text using local TF-IDF based method
+     * WITHOUT USING AI SERVICE
      */
     public float[] vectorizeText(String text) {
         if (text == null || text.trim().isEmpty()) {
             return new float[VECTOR_DIMENSION];
         }
 
-        // Tokenizacija i normalizacija
+        // Tokenization and normalization
         String[] words = text.toLowerCase()
                 .replaceAll("[^a-z0-9\\s]", "")
                 .split("\\s+");
 
         float[] documentVector = new float[VECTOR_DIMENSION];
 
-        // Za svaku reč, dodaj njen vektor u ukupni vektor dokumenta
+        // For each word, add its vector to the document vector
         for (String word : words) {
             float[] wordVector = getWordVector(word);
             for (int i = 0; i < VECTOR_DIMENSION; i++) {
@@ -42,12 +42,12 @@ public class VectorizationService {
             }
         }
 
-        // Normalizuj vektor
+        // Normalize vector
         return normalizeVector(documentVector);
     }
 
     /**
-     * Vektorizuje listu veština
+     * Vectorize list of skills
      */
     public float[] vectorizeSkills(List<String> skills) {
         if (skills == null || skills.isEmpty()) {
@@ -67,11 +67,11 @@ public class VectorizationService {
     }
 
     /**
-     * Generiše vektor za pojedinačnu reč
-     * Koristi hash funkciju za determinističko mapiranje reči na vektore
+     * Generate vector for a single word
+     * Uses hash function for deterministic mapping of words to vectors
      */
     private float[] getWordVector(String word) {
-        // Provjeri cache
+        // Check cache
         if (wordVectors.containsKey(word)) {
             return wordVectors.get(word);
         }
@@ -79,22 +79,22 @@ public class VectorizationService {
         float[] vector = new float[VECTOR_DIMENSION];
 
         try {
-            // Koristi SHA-256 hash za determinističko generisanje
+            // Use SHA-256 hash for deterministic generation
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(word.getBytes(StandardCharsets.UTF_8));
 
-            // Konvertuj hash bytes u float vrednosti
+            // Convert hash bytes to float values
             for (int i = 0; i < VECTOR_DIMENSION && i < hash.length; i++) {
-                // Mapiranje byte vrednosti na float između -1 i 1
+                // Map byte values to float between -1 and 1
                 vector[i] = (hash[i] & 0xFF) / 127.5f - 1.0f;
 
-                // Dodaj malo "šuma" za različite pozicije
+                // Add some "noise" for different positions
                 if (i > 0) {
                     vector[i] += vector[i-1] * 0.1f;
                 }
             }
 
-            // Dodatno raspršivanje za bolje rezultate
+            // Additional scattering for better results
             for (int i = 0; i < VECTOR_DIMENSION; i++) {
                 int hashPos = Math.abs(word.hashCode() + i) % VECTOR_DIMENSION;
                 vector[hashPos] += 0.5f;
@@ -102,7 +102,7 @@ public class VectorizationService {
 
         } catch (Exception e) {
             log.error("Error generating word vector", e);
-            // Fallback na jednostavniji pristup
+            // Fallback to simpler approach
             Random rand = new Random(word.hashCode());
             for (int i = 0; i < VECTOR_DIMENSION; i++) {
                 vector[i] = rand.nextFloat() * 2 - 1;
@@ -110,19 +110,19 @@ public class VectorizationService {
         }
 
         vector = normalizeVector(vector);
-        wordVectors.put(word, vector); // Cache za buduće korišćenje
+        wordVectors.put(word, vector); // Cache for future use
 
         return vector;
     }
 
     /**
-     * Specijalizovan vektor za tehničke veštine
-     * Daje veću težinu poznatim tehnologijama
+     * Specialized vector for technical skills
+     * Gives higher weight to known technologies
      */
     private float[] getSkillVector(String skill) {
         float[] baseVector = getWordVector(skill.toLowerCase());
 
-        // Boost za poznate tehnologije
+        // Boost for known technologies
         Map<String, Float> skillWeights = Map.of(
                 "java", 1.5f,
                 "python", 1.5f,
@@ -148,7 +148,7 @@ public class VectorizationService {
     }
 
     /**
-     * Normalizuje vektor (L2 normalizacija)
+     * Normalize vector (L2 normalization)
      */
     private float[] normalizeVector(float[] vector) {
         float sum = 0;
@@ -171,9 +171,12 @@ public class VectorizationService {
     }
 
     /**
-     * Računa kosinusnu sličnost između dva vektora
+     * Calculate cosine similarity between two vectors
      */
     public double calculateCosineSimilarity(float[] vec1, float[] vec2) {
+        if (vec1 == null || vec2 == null) {
+            throw new IllegalArgumentException("Vectors cannot be null");
+        }
         if (vec1.length != vec2.length) {
             throw new IllegalArgumentException("Vectors must have the same dimension");
         }
@@ -196,8 +199,8 @@ public class VectorizationService {
     }
 
     /**
-     * Inicijalizuje često korišćene reči sa predefinisanim vektorima
-     * Ovo poboljšava konzistentnost vektorizacije
+     * Initialize commonly used words with predefined vectors
+     * This improves consistency of vectorization
      */
     private void initializeCommonWords() {
         // IT termini
@@ -208,16 +211,16 @@ public class VectorizationService {
                 "rest", "agile", "scrum", "testing", "deployment"
         };
 
-        // Generiši konzistentne vektore za česte termine
+        // Generate consistent vectors for common terms
         for (String term : commonITTerms) {
-            getWordVector(term); // Ovo će ih keširati
+            getWordVector(term); // This will cache them
         }
 
         log.info("Initialized {} common word vectors", wordVectors.size());
     }
 
     /**
-     * Kombinuje više vektora u jedan (za složene dokumente)
+     * Combine multiple vectors into one (for complex documents)
      */
     public float[] combineVectors(List<float[]> vectors, List<Float> weights) {
         if (vectors.isEmpty()) {

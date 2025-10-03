@@ -24,8 +24,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Transakciona obrada podataka za Application entitet
- * Implementira Saga pattern (orkestracija) za čuvanje u Elasticsearch i Qdrant
+ * Transactional processing of data for Application entity
+ * Implements Saga pattern (orchestration) for saving to Elasticsearch and Qdrant
  */
 @Service
 public class TransactionalApplicationService {
@@ -52,7 +52,7 @@ public class TransactionalApplicationService {
     private String qdrantUrl;
 
     /**
-     * SAGA STEP 1: Kreiranje prijave sa transakcionom obradom
+     * SAGA STEP 1: Create application with transactional processing
      */
     @Transactional
     public Application createApplication(Application application) {
@@ -62,7 +62,7 @@ public class TransactionalApplicationService {
             logger.info("Starting transactional creation of application: {} -> {}", 
                        application.getCandidateId(), application.getJobPostingId());
             
-            // STEP 1: Proveri da li kandidat i job posting postoje
+            // STEP 1: Check if candidate and job posting exist
             Optional<Candidate> candidateOpt = candidateService.findById(application.getCandidateId());
             Optional<JobPosting> jobOpt = jobPostingService.findById(application.getJobPostingId());
             
@@ -73,7 +73,7 @@ public class TransactionalApplicationService {
                 throw new IllegalArgumentException("Job posting not found: " + application.getJobPostingId());
             }
             
-            // STEP 2: Proveri da li kandidat već ima prijavu za ovaj posao
+            // STEP 2: Check if candidate already has an application for this job
             Application existing = applicationRepository.findByCandidateIdAndJobPostingId(
                 application.getCandidateId(), 
                 application.getJobPostingId()
@@ -83,26 +83,23 @@ public class TransactionalApplicationService {
                 throw new IllegalStateException("Candidate already applied for this position");
             }
             
-            // STEP 3: Vektorizacija cover letter-a
+            // STEP 3: Cover letter will be vectorized when saving to Qdrant
             if (application.getCoverLetter() != null) {
-                application.setCoverLetterVector(
-                    vectorizationService.vectorizeText(application.getCoverLetter())
-                );
-                logger.debug("Cover letter vectorized successfully");
+                logger.debug("Cover letter will be vectorized when saving to Qdrant");
             }
             
-            // STEP 4: Izračunaj match skorove
+            // STEP 4: Calculate match scores
             calculateMatchScores(application, candidateOpt.get(), jobOpt.get());
             
             application.setApplicationDate(LocalDateTime.now());
             application.setStatus("PENDING");
             
-            // STEP 5: Čuvanje u Elasticsearch (glavna baza)
+            // STEP 5: Save to Elasticsearch (main database)
             Application savedApplication = applicationRepository.save(application);
             applicationId = savedApplication.getId();
             logger.info("Application saved to Elasticsearch with ID: {}", applicationId);
             
-            // STEP 6: Čuvanje u Qdrant (vektorska baza)
+            // STEP 6: Save to Qdrant (vector database)
             saveToQdrant(savedApplication, candidateOpt.get(), jobOpt.get());
             logger.info("Application saved to Qdrant successfully");
             
@@ -127,32 +124,30 @@ public class TransactionalApplicationService {
     }
 
     /**
-     * SAGA STEP 2: Ažuriranje prijave sa transakcionom obradom
+     * SAGA STEP 2: Update application with transactional processing
      */
     @Transactional
     public Application updateApplication(String id, Application application) {
         try {
             logger.info("Starting transactional update of application: {}", id);
             
-            // STEP 1: Proveri da li prijava postoji
+            // STEP 1: Check if application exists
             Optional<Application> existingOpt = applicationRepository.findById(id);
             if (existingOpt.isEmpty()) {
                 throw new IllegalArgumentException("Application not found: " + id);
             }
             
-            // STEP 2: Vektorizacija (ako je promenjen cover letter)
+            // STEP 2: Cover letter will be vectorized when saving to Qdrant (if cover letter is changed)
             if (application.getCoverLetter() != null) {
-                application.setCoverLetterVector(
-                    vectorizationService.vectorizeText(application.getCoverLetter())
-                );
+                logger.debug("Cover letter will be vectorized when saving to Qdrant");
             }
             application.setId(id);
             
-            // STEP 3: Ažuriranje u Elasticsearch
+            // STEP 3: Update in Elasticsearch
             Application updatedApplication = applicationRepository.save(application);
             logger.info("Application updated in Elasticsearch: {}", id);
             
-            // STEP 4: Ažuriranje u Qdrant
+            // STEP 4: Update in Qdrant
             updateInQdrant(updatedApplication);
             logger.info("Application updated in Qdrant: {}", id);
             
@@ -166,24 +161,24 @@ public class TransactionalApplicationService {
     }
 
     /**
-     * SAGA STEP 3: Brisanje prijave sa transakcionom obradom
+     * SAGA STEP 3: Delete application with transactional processing
      */
     @Transactional
     public void deleteApplication(String id) {
         try {
             logger.info("Starting transactional deletion of application: {}", id);
             
-            // STEP 1: Proveri da li prijava postoji
+            // STEP 1: Check if application exists
             Optional<Application> existingOpt = applicationRepository.findById(id);
             if (existingOpt.isEmpty()) {
                 throw new IllegalArgumentException("Application not found: " + id);
             }
             
-            // STEP 2: Brisanje iz Qdrant
+            // STEP 2: Delete from Qdrant
             deleteFromQdrant(id);
             logger.info("Application deleted from Qdrant: {}", id);
             
-            // STEP 3: Brisanje iz Elasticsearch
+            // STEP 3: Delete from Elasticsearch
             applicationRepository.deleteById(id);
             logger.info("Application deleted from Elasticsearch: {}", id);
             
@@ -196,16 +191,19 @@ public class TransactionalApplicationService {
     }
 
     /**
-     * Izračunavanje match skorova
+     * Calculate match scores
      */
     private void calculateMatchScores(Application application, Candidate candidate, JobPosting job) {
-        // CV Match Score (vektorska sličnost)
-        if (candidate.getCvVector() != null && job.getDescriptionVector() != null) {
-            double cvScore = vectorizationService.calculateCosineSimilarity(
-                candidate.getCvVector(), 
-                job.getDescriptionVector()
-            );
+        // CV Match Score (vector similarity using Qdrant)
+        try {
+            // Calculate similarity using vectorization service directly
+            float[] cvVector = vectorizationService.vectorizeText(candidate.getCvContent());
+            float[] jobVector = vectorizationService.vectorizeText(job.getDescription());
+            
+            double cvScore = vectorizationService.calculateCosineSimilarity(cvVector, jobVector);
             application.setCvMatchScore(cvScore);
+        } catch (Exception e) {
+            logger.error("Error calculating CV match score for application: {}", application.getId(), e);
         }
         
         // Skill Match Score
@@ -253,7 +251,7 @@ public class TransactionalApplicationService {
     }
 
     /**
-     * Čuvanje prijave u Qdrant
+     * Save application to Qdrant
      */
     private void saveToQdrant(Application application, Candidate candidate, JobPosting job) {
         try {
@@ -261,7 +259,7 @@ public class TransactionalApplicationService {
             
             Map<String, Object> point = new HashMap<>();
             point.put("id", application.getId());
-            point.put("vector", application.getCoverLetterVector()); // Koristi cover letter vektor
+            point.put("vector", vectorizationService.vectorizeText(application.getCoverLetter()));
             
             // Minimalni payload za Qdrant
             Map<String, Object> payload = new HashMap<>();
@@ -297,7 +295,7 @@ public class TransactionalApplicationService {
     }
 
     /**
-     * Ažuriranje prijave u Qdrant
+     * Update application in Qdrant
      */
     private void updateInQdrant(Application application) {
         try {
@@ -305,9 +303,9 @@ public class TransactionalApplicationService {
             
             Map<String, Object> point = new HashMap<>();
             point.put("id", application.getId());
-            point.put("vector", application.getCoverLetterVector());
+            point.put("vector", vectorizationService.vectorizeText(application.getCoverLetter()));
             
-            // Minimalni payload za Qdrant
+            // Minimal payload for Qdrant
             Map<String, Object> payload = new HashMap<>();
             payload.put("id", application.getId());
             payload.put("candidateId", application.getCandidateId());
@@ -341,7 +339,7 @@ public class TransactionalApplicationService {
     }
 
     /**
-     * Brisanje prijave iz Qdrant
+     * Delete application from Qdrant
      */
     private void deleteFromQdrant(String applicationId) {
         try {

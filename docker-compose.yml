@@ -11,11 +11,11 @@ services:
     networks:
       - it-company-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6333/ || exit 1"]
-      interval: 20s
-      timeout: 15s
-      retries: 15
-      start_period: 30s
+      test: ["CMD-SHELL", "pidof qdrant || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
     environment:
       - QDRANT__SERVICE__HTTP_PORT=6333
       - QDRANT__SERVICE__GRPC_PORT=6334
@@ -56,12 +56,14 @@ services:
     ports:
       - "5001:8081"
     depends_on:
-      - qdrant
-      - elasticsearch
+      qdrant:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - it-company-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health", "||", "exit", "1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -83,7 +85,8 @@ services:
     ports:
       - "5000:80"
     depends_on:
-      - recruitment-service
+      recruitment-service:
+        condition: service_healthy
     networks:
       - it-company-network
     healthcheck:

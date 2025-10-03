@@ -50,6 +50,7 @@ public class TestDataService {
         try {
             loadCandidatesData();
             loadJobAdvertisementsData();
+            loadApplicationsData();
             logger.info("Test data loaded successfully!");
         } catch (Exception e) {
             logger.error("Error loading test data: {}", e.getMessage(), e);
@@ -69,15 +70,17 @@ public class TestDataService {
             Map<String, Object> point = new HashMap<>();
             point.put("id", i + 1);
             
-            // Vektorizuj CV sadržaj umesto random vektora
+            // Vectorize CV content instead of random vector
             String cvContent = (String) candidate.get("cv_content");
             float[] cvVector = vectorizationService.vectorizeText(cvContent);
             point.put("vector", cvVector);
             point.put("payload", candidate);
             points.add(point);
             
-            // Add to Elasticsearch
-            addToElasticsearch("candidates", String.valueOf(i + 1), candidate);
+            // Add to Elasticsearch with String ID
+            String candidateId = "candidate_" + (i + 1);
+            candidate.put("id", candidateId); // Add ID to the candidate data
+            addToElasticsearch("candidates", candidateId, candidate);
         }
         
         // Batch add to Qdrant
@@ -99,21 +102,55 @@ public class TestDataService {
             Map<String, Object> point = new HashMap<>();
             point.put("id", i + 1);
             
-            // Vektorizuj job description umesto random vektora
+            // Vectorize job description instead of random vector
             String description = (String) job.get("description");
             float[] descriptionVector = vectorizationService.vectorizeText(description);
             point.put("vector", descriptionVector);
             point.put("payload", job);
             points.add(point);
             
-            // Add to Elasticsearch
-            addToElasticsearch("job_advertisements", String.valueOf(i + 1), job);
+            // Add to Elasticsearch with String ID
+            String jobId = "job_" + (i + 1);
+            job.put("id", jobId); // Add ID to the job data
+            addToElasticsearch("job_advertisements", jobId, job);
         }
         
         // Batch add to Qdrant
         addBatchToQdrant("job_advertisements", points);
         
         logger.info("Loaded {} job advertisements", jobs.size());
+    }
+
+    private void loadApplicationsData() {
+        logger.info("Loading applications test data...");
+        
+        List<Map<String, Object>> applications = createApplicationsData();
+        List<Map<String, Object>> points = new ArrayList<>();
+        
+        for (int i = 0; i < applications.size(); i++) {
+            Map<String, Object> application = applications.get(i);
+            
+            // Create point for Qdrant with real vectorization
+            Map<String, Object> point = new HashMap<>();
+            point.put("id", i + 1);
+            
+            // Vectorize application content
+            String coverLetter = (String) application.get("coverLetter");
+            float[] coverLetterVector = vectorizationService.vectorizeText(coverLetter);
+            point.put("vector", coverLetterVector);
+            point.put("payload", application);
+            points.add(point);
+            
+            // Add to Elasticsearch with String ID
+            String applicationId = "application_" + (i + 1);
+            application.put("id", applicationId);
+            addToElasticsearch("applications", applicationId, application);
+        }
+        
+        // Add batch to Qdrant
+        addBatchToQdrant("applications", points);
+        
+        logger.info("Loaded {} applications", applications.size());
     }
 
     private List<Map<String, Object>> createCandidatesData() {
@@ -131,7 +168,7 @@ public class TestDataService {
         
         String[] locations = {"Belgrade", "Novi Sad", "Nis", "Kragujevac", "Subotica"};
         
-        // Različiti CV sadržaji za bolju vektorsku pretragu
+        // Different CV contents for better vector search
         String[] cvTemplates = {
             "Experienced Java developer with 5 years of experience in enterprise software development. " +
             "Specialized in Spring Boot, microservices architecture, and cloud technologies. " +
@@ -276,6 +313,47 @@ public class TestDataService {
         }
         
         return jobs;
+    }
+
+    private List<Map<String, Object>> createApplicationsData() {
+        List<Map<String, Object>> applications = new ArrayList<>();
+        
+        String[] candidateIds = {"candidate_1", "candidate_2", "candidate_3", "candidate_4", "candidate_5",
+                                "candidate_6", "candidate_7", "candidate_8", "candidate_9", "candidate_10"};
+        
+        String[] jobIds = {"job_1", "job_2", "job_3", "job_4", "job_5",
+                          "job_6", "job_7", "job_8", "job_9", "job_10"};
+        
+        String[] statuses = {"Applied", "Under Review", "Interview Scheduled", "Rejected", "Accepted"};
+        
+        String[] coverLetters = {
+            "I am very interested in this position and believe my skills match your requirements perfectly. I have extensive experience in Java development and would love to contribute to your team.",
+            "With my background in software engineering and passion for technology, I am excited about the opportunity to join your company and work on innovative projects.",
+            "I am writing to express my strong interest in this role. My experience in full-stack development and problem-solving skills make me an ideal candidate for this position.",
+            "Having worked in the tech industry for several years, I am confident that I can bring valuable expertise and fresh perspectives to your development team.",
+            "I am enthusiastic about this opportunity and believe my technical skills and collaborative approach would be a great fit for your organization.",
+            "With my strong foundation in programming and eagerness to learn, I am excited about the possibility of contributing to your company's success.",
+            "I am very interested in this position and would love to discuss how my experience can benefit your team and help achieve your project goals.",
+            "My passion for technology and proven track record in software development make me an excellent candidate for this role.",
+            "I am excited about the opportunity to apply my skills and knowledge to contribute meaningfully to your team and company objectives.",
+            "With my technical expertise and strong work ethic, I am confident that I would be a valuable addition to your development team."
+        };
+        
+        for (int i = 0; i < 10; i++) {
+            Map<String, Object> application = new HashMap<>();
+            application.put("candidateId", candidateIds[i]);
+            application.put("jobPostingId", jobIds[i]);
+            application.put("status", statuses[i % statuses.length]);
+            application.put("coverLetter", coverLetters[i]);
+            application.put("appliedAt", "2024-01-" + String.format("%02d", (i % 28) + 1) + "T10:00:00Z");
+            application.put("notes", "Application submitted through company website");
+            application.put("resumeUrl", "/resumes/candidate_" + (i + 1) + ".pdf");
+            application.put("portfolioUrl", "https://portfolio.com/candidate_" + (i + 1));
+            
+            applications.add(application);
+        }
+        
+        return applications;
     }
 
     private void addBatchToQdrant(String collection, List<Map<String, Object>> points) {
