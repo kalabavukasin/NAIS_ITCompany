@@ -23,10 +23,9 @@ public class GatewayController : ControllerBase
 
     // Recruitment service endpoints - Job Postings
     [HttpPost("recruitment/job-postings")]
-    [Authorize]
-    public async Task<IActionResult> CreateJobPosting([FromBody] object jobPosting)
+    public async Task<IActionResult> CreateJobPosting()
     {
-        return await ForwardRequest("recruitment", "api/job-postings", HttpMethod.Post, includeAuth: true);
+        return await ForwardRequest("recruitment", "api/job-postings", HttpMethod.Post);
     }
 
     [HttpGet("recruitment/job-postings")]
@@ -42,17 +41,15 @@ public class GatewayController : ControllerBase
     }
 
     [HttpPut("recruitment/job-postings/{id}")]
-    [Authorize]
     public async Task<IActionResult> UpdateJobPosting(string id)
     {
-        return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Put, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Put);
     }
 
     [HttpDelete("recruitment/job-postings/{id}")]
-    [Authorize]
     public async Task<IActionResult> DeleteJobPosting(string id)
     {
-        return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Delete, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/job-postings/{id}", HttpMethod.Delete);
     }
 
     // Recruitment service endpoints - Candidates
@@ -75,17 +72,15 @@ public class GatewayController : ControllerBase
     }
 
     [HttpPut("recruitment/candidates/{id}")]
-    [Authorize]
     public async Task<IActionResult> UpdateCandidate(string id)
     {
-        return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Put, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Put);
     }
 
     [HttpDelete("recruitment/candidates/{id}")]
-    [Authorize]
     public async Task<IActionResult> DeleteCandidate(string id)
     {
-        return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Delete, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/candidates/{id}", HttpMethod.Delete);
     }
 
     // Recruitment service endpoints - Applications
@@ -94,33 +89,35 @@ public class GatewayController : ControllerBase
     {
         return await ForwardRequest("recruitment", "api/applications", HttpMethod.Post);
     }
+    
+    [HttpPost("recruitment/applications/create")]
+    public async Task<IActionResult> CreateApplicationDirect()
+    {
+        return await ForwardRequest("recruitment", "api/applications/create", HttpMethod.Post);
+    }
 
     [HttpGet("recruitment/applications")]
-    [Authorize]
     public async Task<IActionResult> GetAllApplications()
     {
-        return await ForwardRequest("recruitment", "api/applications", HttpMethod.Get, includeAuth: true);
+        return await ForwardRequest("recruitment", "api/applications", HttpMethod.Get);
     }
 
     [HttpGet("recruitment/applications/{id}")]
-    [Authorize]
     public async Task<IActionResult> GetApplication(string id)
     {
-        return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Get, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Get);
     }
 
     [HttpPut("recruitment/applications/{id}")]
-    [Authorize]
     public async Task<IActionResult> UpdateApplication(string id)
     {
-        return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Put, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Put);
     }
-
+    
     [HttpDelete("recruitment/applications/{id}")]
-    [Authorize]
     public async Task<IActionResult> DeleteApplication(string id)
     {
-        return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Delete, includeAuth: true);
+        return await ForwardRequest("recruitment", $"api/applications/{id}", HttpMethod.Delete);
     }
 
     // Recruitment service endpoints - Search and Analytics
@@ -155,6 +152,36 @@ public class GatewayController : ControllerBase
         return await ForwardRequest("recruitment", "api/candidates/search-with-vector", HttpMethod.Post);
     }
 
+    [HttpPost("recruitment/candidates/hybrid-search-advanced")]
+    public async Task<IActionResult> HybridSearchCandidatesAdvanced()
+    {
+        return await ForwardRequest("recruitment", "api/candidates/hybrid-search-advanced", HttpMethod.Post);
+    }
+
+    [HttpGet("recruitment/candidates/count-by-location/{location}")]
+    public async Task<IActionResult> CountCandidatesByLocation(string location)
+    {
+        return await ForwardRequest("recruitment", $"api/candidates/count-by-location/{location}", HttpMethod.Get);
+    }
+
+    [HttpPost("recruitment/candidates/single-vector-search")]
+    public async Task<IActionResult> SingleVectorSearchCandidates()
+    {
+        return await ForwardRequest("recruitment", "api/candidates/single-vector-search", HttpMethod.Post);
+    }
+
+    [HttpPost("recruitment/candidates/search-candidates")]
+    public async Task<IActionResult> SearchCandidatesBasic()
+    {
+        return await ForwardRequest("recruitment", "api/candidates/search-candidates", HttpMethod.Post);
+    }
+
+    [HttpGet("recruitment/candidates/rank/{jobPostingId}")]
+    public async Task<IActionResult> RankCandidates(string jobPostingId)
+    {
+        return await ForwardRequest("recruitment", $"api/candidates/rank/{jobPostingId}", HttpMethod.Get);
+    }
+
     [HttpPost("recruitment/jobs/search")]
     public async Task<IActionResult> SearchJobsWithFilters()
     {
@@ -163,10 +190,9 @@ public class GatewayController : ControllerBase
 
 
     [HttpGet("recruitment/analytics/statistics")]
-    [Authorize]
     public async Task<IActionResult> GetRecruitmentStatistics()
     {
-        return await ForwardRequest("recruitment", "api/analytics/statistics", HttpMethod.Get, includeAuth: true);
+        return await ForwardRequest("recruitment", "api/analytics/statistics", HttpMethod.Get);
     }
 
     private async Task<IActionResult> ForwardRequest(string serviceName, string path, HttpMethod method, bool includeAuth = false)

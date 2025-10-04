@@ -37,9 +37,6 @@ public class Candidate {
     private Integer yearsOfExperience;
 
     @Field(type = FieldType.Nested)
-    private List<WorkExperience> workExperiences;
-
-    @Field(type = FieldType.Nested)
     private List<Education> educationHistory;
 
     @Field(type = FieldType.Keyword)
@@ -75,7 +72,7 @@ public class Candidate {
     public Candidate() {}
 
     public Candidate(String id, String firstName, String lastName, String email, String phone, String location,
-                     String cvContent, List<String> skills, Integer yearsOfExperience, List<WorkExperience> workExperiences,
+                     String cvContent, List<String> skills, Integer yearsOfExperience,
                      List<Education> educationHistory, List<String> certifications, String currentPosition,
                      Double expectedSalary, String preferredEmploymentType, Boolean willingToRelocate,
                      LocalDate dateOfBirth, String linkedinProfile, String githubProfile, Double matchScore,
@@ -89,7 +86,6 @@ public class Candidate {
         this.cvContent = cvContent;
         this.skills = skills;
         this.yearsOfExperience = yearsOfExperience;
-        this.workExperiences = workExperiences;
         this.educationHistory = educationHistory;
         this.certifications = certifications;
         this.currentPosition = currentPosition;
@@ -121,8 +117,6 @@ public class Candidate {
     public void setSkills(List<String> skills) { this.skills = skills; }
     public Integer getYearsOfExperience() { return yearsOfExperience; }
     public void setYearsOfExperience(Integer yearsOfExperience) { this.yearsOfExperience = yearsOfExperience; }
-    public List<WorkExperience> getWorkExperiences() { return workExperiences; }
-    public void setWorkExperiences(List<WorkExperience> workExperiences) { this.workExperiences = workExperiences; }
     public List<Education> getEducationHistory() { return educationHistory; }
     public void setEducationHistory(List<Education> educationHistory) { this.educationHistory = educationHistory; }
     public List<String> getCertifications() { return certifications; }

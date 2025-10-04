@@ -3,9 +3,6 @@ package com.itcompany.recruitment.service;
 import com.itcompany.recruitment.model.Application;
 import com.itcompany.recruitment.model.Candidate;
 import com.itcompany.recruitment.model.JobPosting;
-import com.itcompany.recruitment.model.qdrant.ApplicationVector;
-import com.itcompany.recruitment.model.qdrant.CandidateVector;
-import com.itcompany.recruitment.model.qdrant.JobPostingVector;
 import com.itcompany.recruitment.repository.ApplicationRepository;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -21,18 +18,15 @@ public class ApplicationService {
     private final CandidateService candidateService;
     private final JobPostingService jobPostingService;
     private final VectorizationService vectorizationService;
-    private final QdrantService qdrantService;
     
     public ApplicationService(ApplicationRepository applicationRepository,
                              CandidateService candidateService,
                              JobPostingService jobPostingService,
-                             VectorizationService vectorizationService,
-                             QdrantService qdrantService) {
+                             VectorizationService vectorizationService) {
         this.applicationRepository = applicationRepository;
         this.candidateService = candidateService;
         this.jobPostingService = jobPostingService;
         this.vectorizationService = vectorizationService;
-        this.qdrantService = qdrantService;
     }
     
     public Application submitApplication(Application application) {
@@ -55,33 +49,8 @@ public class ApplicationService {
         // Save to Elasticsearch (without vectors)
         Application savedApplication = applicationRepository.save(application);
         
-        // Create and store vectors in Qdrant
-        if (application.getCoverLetter() != null && !application.getCoverLetter().trim().isEmpty()) {
-            try {
-                float[] coverLetterVector = vectorizationService.vectorizeText(application.getCoverLetter());
-                
-                // Check if vector is valid
-                if (coverLetterVector != null && coverLetterVector.length > 0) {
-                    ApplicationVector applicationVector = new ApplicationVector(
-                        savedApplication.getId(),
-                        coverLetterVector,
-                        application.getCoverLetter(),
-                        application.getCandidateId(),
-                        application.getJobPostingId()
-                    );
-                    
-                    qdrantService.storeApplicationVector(applicationVector);
-                    logger.info("Successfully stored application vectors for ID: {}", savedApplication.getId());
-                } else {
-                    logger.warn("Empty vector generated for application ID: {}, skipping Qdrant storage", savedApplication.getId());
-                }
-                
-            } catch (Exception e) {
-                logger.error("Error storing application vectors for ID: {}", savedApplication.getId(), e);
-            }
-        } else {
-            logger.warn("No cover letter provided for application ID: {}, skipping Qdrant storage", savedApplication.getId());
-        }
+        // Applications are now stored only in Elasticsearch (no vectorization needed)
+        logger.info("Application {} stored successfully in Elasticsearch", savedApplication.getId());
         
         return savedApplication;
     }
@@ -94,28 +63,13 @@ public class ApplicationService {
             Candidate candidate = candidateOpt.get();
             JobPosting job = jobOpt.get();
             
-            // CV Match Score (vector similarity using Qdrant)
+            // CV Match Score (vector similarity using direct vectorization)
             try {
-                // Get candidate CV vector from Qdrant
-                List<CandidateVector> candidateVectors = qdrantService.searchSimilarCandidates(
-                    vectorizationService.vectorizeText(candidate.getCvContent()), 1);
-                
-                // Get job description vector from Qdrant
-                List<JobPostingVector> jobVectors = qdrantService.searchSimilarJobPostings(
-                    vectorizationService.vectorizeText(job.getDescription()), 1);
-                
-                if (!candidateVectors.isEmpty() && !jobVectors.isEmpty()) {
-                    // Calculate similarity using Qdrant vectors
-                    float[] cvVector = candidateVectors.get(0).getCvVector();
-                    float[] jobVector = jobVectors.get(0).getDescriptionVector();
-                    
-                    if (cvVector != null && jobVector != null) {
-                        double cvScore = vectorizationService.calculateCosineSimilarity(cvVector, jobVector);
-                        application.setCvMatchScore(cvScore);
-                    } else {
-                        logger.warn("Null vectors found for application: {}, skipping CV match calculation", application.getId());
-                    }
-                }
+                // Direct vectorization and similarity calculation
+                float[] cvVector = vectorizationService.vectorizeText(candidate.getCvContent());
+                float[] jobVector = vectorizationService.vectorizeText(job.getDescription());
+                double cvScore = vectorizationService.calculateCosineSimilarity(cvVector, jobVector);
+                application.setCvMatchScore(cvScore);
             } catch (Exception e) {
                 logger.error("Error calculating CV match score for application: {}", application.getId(), e);
             }
@@ -257,7 +211,85 @@ public class ApplicationService {
     }
     
     public List<Application> findAll() {
-        return (List<Application>) applicationRepository.findAll();
+        Iterable<Application> applications = applicationRepository.findAll();
+        List<Application> result = new ArrayList<>();
+        applications.forEach(result::add);
+        return result;
+    }
+    
+    // Additional CRUD operations
+    public Application updateApplication(String id, Application application) {
+        Optional<Application> existingOpt = applicationRepository.findById(id);
+        if (existingOpt.isEmpty()) {
+            throw new IllegalArgumentException("Application not found with id: " + id);
+        }
+        
+        Application existing = existingOpt.get();
+        
+        // Update fields
+        if (application.getCandidateId() != null) {
+            existing.setCandidateId(application.getCandidateId());
+        }
+        if (application.getJobPostingId() != null) {
+            existing.setJobPostingId(application.getJobPostingId());
+        }
+        if (application.getStatus() != null) {
+            existing.setStatus(application.getStatus());
+        }
+        if (application.getHrNotes() != null) {
+            existing.setHrNotes(application.getHrNotes());
+        }
+        if (application.getIsShortlisted() != null) {
+            existing.setIsShortlisted(application.getIsShortlisted());
+        }
+        if (application.getRanking() != null) {
+            existing.setRanking(application.getRanking());
+        }
+        
+        // Recalculate match scores if candidate or job changed
+        if ((application.getCandidateId() != null && !application.getCandidateId().equals(existing.getCandidateId())) ||
+            (application.getJobPostingId() != null && !application.getJobPostingId().equals(existing.getJobPostingId()))) {
+            calculateMatchScores(existing);
+        }
+        
+        existing.setReviewDate(LocalDateTime.now());
+        
+        return applicationRepository.save(existing);
+    }
+    
+    public void deleteApplication(String id) {
+        Optional<Application> applicationOpt = applicationRepository.findById(id);
+        if (applicationOpt.isEmpty()) {
+            throw new IllegalArgumentException("Application not found with id: " + id);
+        }
+        
+        applicationRepository.deleteById(id);
+        logger.info("Application {} deleted successfully", id);
+    }
+    
+    public Application createApplication(Application application) {
+        // Check if candidate already applied for this position
+        Application existing = applicationRepository.findByCandidateIdAndJobPostingId(
+            application.getCandidateId(), 
+            application.getJobPostingId()
+        );
+        
+        if (existing != null) {
+            throw new IllegalStateException("Candidate already applied for this position");
+        }
+        
+        // Calculate match scores
+        calculateMatchScores(application);
+        
+        application.setApplicationDate(LocalDateTime.now());
+        if (application.getStatus() == null) {
+            application.setStatus("PENDING");
+        }
+        
+        Application savedApplication = applicationRepository.save(application);
+        logger.info("Application {} created successfully", savedApplication.getId());
+        
+        return savedApplication;
     }
     
 }

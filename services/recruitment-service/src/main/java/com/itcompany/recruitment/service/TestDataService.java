@@ -1,6 +1,5 @@
 package com.itcompany.recruitment.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,10 +14,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 public class TestDataService {
@@ -42,8 +41,6 @@ public class TestDataService {
     @Value("${elasticsearch.url}")
     private String elasticsearchUrl;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
     public void loadTestData() {
         logger.info("Loading test data...");
         
@@ -66,20 +63,40 @@ public class TestDataService {
         for (int i = 0; i < candidates.size(); i++) {
             Map<String, Object> candidate = candidates.get(i);
             
-            // Create point for Qdrant with real vectorization
+            // Create point for Qdrant with multiple vectorized fields
             Map<String, Object> point = new HashMap<>();
-            point.put("id", i + 1);
+            // Use sequential ID for test data (starting from 1000 to avoid conflicts with real candidates)
+            int qdrantId = 1000 + i + 1;
+            point.put("id", qdrantId);
             
-            // Vectorize CV content instead of random vector
+            // Vectorize multiple fields for better search capabilities
             String cvContent = (String) candidate.get("cv_content");
-            float[] cvVector = vectorizationService.vectorizeText(cvContent);
-            point.put("vector", cvVector);
+            String[] skillsArray = (String[]) candidate.get("skills");
+            List<String> skillsList = Arrays.asList(skillsArray);
+            String skills = String.join(", ", skillsList);
+            //String workExperience = generateWorkExperienceText(candidate);
+            
+            // Create combined vector from multiple fields
+            String combinedText = cvContent + " " + skills;
+            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
+            point.put("vector", combinedVector);
+            
+            // Add individual vectorized fields for multi-vector search
+           /* Map<String, Object> vectors = new HashMap<>();
+            vectors.put("cv_vector", vectorizationService.vectorizeText(cvContent));
+            vectors.put("skills_vector", vectorizationService.vectorizeText(skills));
+            vectors.put("experience_vector", vectorizationService.vectorizeText(workExperience));
+            point.put("named_vectors", vectors);*/
+            
+            // Add to Elasticsearch with String ID first
+            String candidateId = "candidate_" + (i + 1);
+            candidate.put("id", candidateId);
+            
+            // Add Qdrant ID to payload for reference
+            candidate.put("qdrant_id", qdrantId);
             point.put("payload", candidate);
             points.add(point);
             
-            // Add to Elasticsearch with String ID
-            String candidateId = "candidate_" + (i + 1);
-            candidate.put("id", candidateId); // Add ID to the candidate data
             addToElasticsearch("candidates", candidateId, candidate);
         }
         
@@ -88,6 +105,7 @@ public class TestDataService {
         
         logger.info("Loaded {} candidates", candidates.size());
     }
+    
 
     private void loadJobAdvertisementsData() {
         logger.info("Loading job advertisements test data...");
@@ -98,20 +116,34 @@ public class TestDataService {
         for (int i = 0; i < jobs.size(); i++) {
             Map<String, Object> job = jobs.get(i);
             
-            // Create point for Qdrant with real vectorization
+            // Create point for Qdrant with multiple vectorized fields
             Map<String, Object> point = new HashMap<>();
-            point.put("id", i + 1);
+            // Use sequential ID for test data (starting from 2000 to avoid conflicts with real job postings)
+            int qdrantId = 2000 + i + 1;
+            point.put("id", qdrantId);
             
-            // Vectorize job description instead of random vector
+            // Vectorize multiple fields for better search capabilities
+            String title = (String) job.get("title");
             String description = (String) job.get("description");
-            float[] descriptionVector = vectorizationService.vectorizeText(description);
-            point.put("vector", descriptionVector);
+            String company = (String) job.get("company");
+            @SuppressWarnings("unchecked")
+            List<String> skillsList = (List<String>) job.get("skills_required");
+            String skills = String.join(", ", skillsList);
+            
+            // Create combined vector from multiple fields
+            String combinedText = title + " " + description + " " + company + " " + skills;
+            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
+            point.put("vector", combinedVector);
+            
+            // Add to Elasticsearch with String ID first
+            String jobId = "job_" + (i + 1);
+            job.put("id", jobId);
+            
+            // Add Qdrant ID to payload for reference
+            job.put("qdrant_id", qdrantId);
             point.put("payload", job);
             points.add(point);
             
-            // Add to Elasticsearch with String ID
-            String jobId = "job_" + (i + 1);
-            job.put("id", jobId); // Add ID to the job data
             addToElasticsearch("job_advertisements", jobId, job);
         }
         
@@ -125,30 +157,15 @@ public class TestDataService {
         logger.info("Loading applications test data...");
         
         List<Map<String, Object>> applications = createApplicationsData();
-        List<Map<String, Object>> points = new ArrayList<>();
         
         for (int i = 0; i < applications.size(); i++) {
             Map<String, Object> application = applications.get(i);
             
-            // Create point for Qdrant with real vectorization
-            Map<String, Object> point = new HashMap<>();
-            point.put("id", i + 1);
-            
-            // Vectorize application content
-            String coverLetter = (String) application.get("coverLetter");
-            float[] coverLetterVector = vectorizationService.vectorizeText(coverLetter);
-            point.put("vector", coverLetterVector);
-            point.put("payload", application);
-            points.add(point);
-            
-            // Add to Elasticsearch with String ID
+            // Add to Elasticsearch only (no vectorization needed for applications)
             String applicationId = "application_" + (i + 1);
             application.put("id", applicationId);
             addToElasticsearch("applications", applicationId, application);
         }
-        
-        // Add batch to Qdrant
-        addBatchToQdrant("applications", points);
         
         logger.info("Loaded {} applications", applications.size());
     }
@@ -156,204 +173,658 @@ public class TestDataService {
     private List<Map<String, Object>> createCandidatesData() {
         List<Map<String, Object>> candidates = new ArrayList<>();
         
-        String[] names = {"Marko Petrovic", "Ana Jovanovic", "Stefan Nikolic", "Milica Stojanovic", 
-                         "Nikola Djordjevic", "Jovana Popovic", "Milos Radovic", "Tijana Markovic",
-                         "Aleksandar Vukovic", "Sara Petrovic"};
+        // Expanded data arrays for 1000+ candidates
+        String[] firstNames = {"Marko", "Ana", "Stefan", "Milica", "Nikola", "Jovana", "Milos", "Tijana", 
+                              "Aleksandar", "Sara", "Petar", "Jelena", "Vladimir", "Marija", "Dusan", 
+                              "Natasa", "Bojan", "Tamara", "Nemanja", "Jovana", "Milan", "Snezana", 
+                              "Dejan", "Vesna", "Zoran", "Gordana", "Slobodan", "Radmila", "Miodrag", "Biljana"};
         
-        String[] skills = {"Java, Spring Boot, MySQL", "Python, Django, PostgreSQL", 
-                          "JavaScript, React, Node.js", "C#, .NET, SQL Server",
-                          "Python, FastAPI, MongoDB", "Java, Spring, Elasticsearch",
-                          "JavaScript, Vue.js, MySQL", "Python, Flask, Redis",
-                          "Java, Quarkus, PostgreSQL", "TypeScript, Angular, MongoDB"};
+        String[] lastNames = {"Petrovic", "Jovanovic", "Nikolic", "Stojanovic", "Djordjevic", "Popovic", 
+                             "Radovic", "Markovic", "Vukovic", "Petrovic", "Ilic", "Milic", "Pavlovic", 
+                             "Stefanovic", "Lazic", "Mitic", "Jankovic", "Kostic", "Ristic", "Mladenovic"};
         
-        String[] locations = {"Belgrade", "Novi Sad", "Nis", "Kragujevac", "Subotica"};
+        String[] locations = {"Belgrade", "Novi Sad", "Nis", "Kragujevac", "Subotica", "Cacak", "Zrenjanin", 
+                             "Pancevo", "Novi Pazar", "Kraljevo", "Smederevo", "Leskovac", "Uzice", "Vranje", 
+                             "Sabac", "Pozarevac", "Krusevac", "Sombor", "Zajecar", "Sremska Mitrovica"};
         
-        // Different CV contents for better vector search
-        String[] cvTemplates = {
-            "Experienced Java developer with 5 years of experience in enterprise software development. " +
-            "Specialized in Spring Boot, microservices architecture, and cloud technologies. " +
-            "Led multiple projects involving REST APIs, database design, and team management.",
-            
-            "Python developer with 3 years of experience in data science and web development. " +
-            "Expert in Django, FastAPI, machine learning libraries, and PostgreSQL. " +
-            "Passionate about AI and data analysis with strong mathematical background.",
-            
-            "Frontend developer with 4 years of experience in modern JavaScript frameworks. " +
-            "Expert in React, Vue.js, TypeScript, and responsive web design. " +
-            "Strong focus on user experience and performance optimization.",
-            
-            "Full-stack .NET developer with 6 years of experience in enterprise applications. " +
-            "Proficient in C#, ASP.NET Core, SQL Server, and Azure cloud services. " +
-            "Experience with DevOps practices and CI/CD pipelines.",
-            
-            "DevOps engineer with 5 years of experience in cloud infrastructure and automation. " +
-            "Expert in Docker, Kubernetes, AWS, and infrastructure as code. " +
-            "Strong background in monitoring, logging, and security practices.",
-            
-            "Data scientist with 4 years of experience in machine learning and analytics. " +
-            "Proficient in Python, R, TensorFlow, and statistical modeling. " +
-            "Experience with big data technologies and business intelligence.",
-            
-            "Mobile app developer with 3 years of experience in cross-platform development. " +
-            "Expert in React Native, Flutter, and native iOS/Android development. " +
-            "Strong focus on user interface design and app store optimization.",
-            
-            "Cloud solutions architect with 7 years of experience in enterprise cloud migration. " +
-            "Expert in AWS, Azure, Terraform, and cloud security best practices. " +
-            "Led multiple cloud transformation projects for Fortune 500 companies.",
-            
-            "QA automation engineer with 4 years of experience in test automation and quality assurance. " +
-            "Proficient in Selenium, Cypress, and various testing frameworks. " +
-            "Strong background in performance testing and continuous integration.",
-            
-            "Product manager with 5 years of experience in agile product development. " +
-            "Expert in product strategy, user research, and cross-functional team leadership. " +
-            "Strong analytical skills and experience with data-driven decision making."
+        String[] skillCategories = {
+            "Java, Spring Boot, MySQL, Hibernate, Maven, Git",
+            "Python, Django, FastAPI, PostgreSQL, Pandas, NumPy",
+            "JavaScript, React, Node.js, Express, MongoDB, TypeScript",
+            "C#, .NET Core, ASP.NET, SQL Server, Entity Framework, Azure",
+            "Python, Flask, Redis, Celery, Docker, Kubernetes",
+            "Java, Spring, Elasticsearch, Kibana, Logstash, Microservices",
+            "JavaScript, Vue.js, MySQL, Webpack, Babel, Sass",
+            "Python, Scikit-learn, TensorFlow, Jupyter, Matplotlib, Seaborn",
+            "Go, Gin, PostgreSQL, gRPC, Protocol Buffers, Docker",
+            "PHP, Laravel, MySQL, Composer, Redis, Apache",
+            "Ruby, Rails, PostgreSQL, RSpec, Capybara, Sidekiq",
+            "Scala, Akka, Spark, Kafka, Cassandra, SBT",
+            "Rust, Actix, PostgreSQL, Tokio, Serde, Cargo",
+            "Kotlin, Spring Boot, PostgreSQL, Gradle, JUnit, MockK",
+            "Swift, iOS, Xcode, Core Data, Alamofire, SnapKit",
+            "Dart, Flutter, Firebase, Provider, Bloc, GetX",
+            "C++, Qt, CMake, Boost, OpenCV, Eigen",
+            "C, Linux, Make, GDB, Valgrind, POSIX",
+            "Assembly, Embedded Systems, Microcontrollers, RTOS, I2C, SPI",
+            "MATLAB, Simulink, Control Systems, Signal Processing, Image Processing"
         };
         
-        for (int i = 0; i < 10; i++) {
+        String[] jobTitles = {
+            "Senior Software Engineer", "Full Stack Developer", "Backend Developer", "Frontend Developer",
+            "DevOps Engineer", "Data Scientist", "Machine Learning Engineer", "Mobile App Developer",
+            "Cloud Solutions Architect", "QA Automation Engineer", "Product Manager", "Technical Lead",
+            "Software Architect", "Database Administrator", "System Administrator", "Security Engineer",
+            "UI/UX Designer", "Business Analyst", "Project Manager", "Scrum Master"
+        };
+        
+        String[] companies = {
+            "TechCorp", "InnovateSoft", "DataFlow", "CloudTech", "DevSolutions", "AI Innovations", 
+            "MobileFirst", "CloudScale", "QualityAssured", "ProductPro", "CodeCraft", "DataDriven",
+            "CloudNative", "AgileWorks", "TechForward", "InnovationLab", "DigitalCraft", "SmartTech",
+            "FutureSoft", "EliteCode", "ProDev", "TechMasters", "CodeGenius", "DataWise", "CloudPro"
+        };
+        
+        String[] universities = {
+            "Faculty of Technical Sciences, University of Novi Sad",
+            "School of Electrical Engineering, University of Belgrade",
+            "Faculty of Mathematics, University of Belgrade",
+            "Faculty of Technical Sciences, University of Nis",
+            "Faculty of Computer Science, University of Kragujevac",
+            "Faculty of Organizational Sciences, University of Belgrade",
+            "Faculty of Economics, University of Belgrade",
+            "Faculty of Mechanical Engineering, University of Belgrade",
+            "Faculty of Civil Engineering, University of Belgrade",
+            "Faculty of Mining and Geology, University of Belgrade"
+        };
+        
+        String[] degreeTypes = {"Bachelor of Science", "Master of Science", "Master of Engineering", 
+                               "Bachelor of Engineering", "Master of Business Administration", "PhD"};
+        
+        String[] fieldsOfStudy = {
+            "Computer Science", "Software Engineering", "Information Technology", "Computer Engineering",
+            "Data Science", "Artificial Intelligence", "Cybersecurity", "Information Systems",
+            "Mathematics", "Statistics", "Physics", "Electrical Engineering"
+        };
+        
+        String[] certifications = {
+            "AWS Certified Solutions Architect", "Google Cloud Professional", "Microsoft Azure Expert",
+            "Oracle Certified Professional", "Cisco Certified Network Associate", "PMP Certification",
+            "Scrum Master Certification", "ITIL Foundation", "CompTIA Security+", "Kubernetes Administrator"
+        };
+        
+        // Generate 1000+ candidates
+        for (int i = 0; i < 1200; i++) {
             Map<String, Object> candidate = new HashMap<>();
-            candidate.put("name", names[i]);
-            candidate.put("email", "candidate" + (i + 1) + "@email.com");
-            candidate.put("phone", "+381 6" + String.format("%08d", 10000000 + i));
-            candidate.put("skills", skills[i]);
-            candidate.put("experience", 2 + (i % 5));
+            
+            // Basic information
+            String firstName = firstNames[i % firstNames.length];
+            String lastName = lastNames[i % lastNames.length];
+            candidate.put("firstName", firstName);
+            candidate.put("lastName", lastName);
+            candidate.put("name", firstName + " " + lastName);
+            candidate.put("email", firstName.toLowerCase() + "." + lastName.toLowerCase() + (i + 1) + "@email.com");
+            candidate.put("phone", "+381 6" + String.format("%08d", 10000000 + (i % 1000000)));
             candidate.put("location", locations[i % locations.length]);
-            candidate.put("cv_content", cvTemplates[i]);
-            candidate.put("education", "Faculty of Technical Sciences, Computer Science");
-            candidate.put("languages", "Serbian (native), English (fluent)");
-            candidate.put("created_at", "2024-01-" + String.format("%02d", (i % 28) + 1) + "T10:00:00Z");
+            
+            // Skills and experience - use random selection instead of modulo
+            String skills = skillCategories[(int)(Math.random() * skillCategories.length)];
+            candidate.put("skills", skills.split(", "));
+            int yearsExp = 1 + (int)(Math.random() * 15); // 1-15 years experience
+            candidate.put("experience", yearsExp);
+            candidate.put("yearsOfExperience", yearsExp);
+            
+            // CV content for vectorization - use random job title and company
+            String jobTitle = jobTitles[(int)(Math.random() * jobTitles.length)];
+            String company = companies[(int)(Math.random() * companies.length)];
+            
+            // Determine CV template based on skills, not just job title
+            String cvTemplateType = determineCvTemplateType(skills);
+            String cvContent = generateCvContent(firstName, lastName, skills, jobTitle, company, yearsExp, cvTemplateType);
+            candidate.put("cvContent", cvContent);
+            candidate.put("cv_content", cvContent);
+            
+            // Additional fields for better filtering
+            candidate.put("currentPosition", jobTitle);
+            candidate.put("expectedSalary", 50000 + (int)(Math.random() * 100000)); // $50k - $150k
+            candidate.put("preferredEmploymentType", Math.random() < 0.33 ? "Full-time" : Math.random() < 0.66 ? "Part-time" : "Contract");
+            candidate.put("willingToRelocate", Math.random() < 0.5);
+            candidate.put("dateOfBirth", generateRandomDate(1970, 2000));
+            candidate.put("linkedinProfile", "https://linkedin.com/in/" + firstName.toLowerCase() + lastName.toLowerCase());
+            candidate.put("githubProfile", "https://github.com/" + firstName.toLowerCase() + lastName.toLowerCase());
+            candidate.put("matchScore", Math.random() * 100);
+            
+            // Work experience
+            candidate.put("workExperiences", generateWorkExperiences(companies, jobTitles, 1 + (int)(Math.random() * 4)));
+            
+            // Education history
+            candidate.put("educationHistory", generateEducationHistory(universities, degreeTypes, fieldsOfStudy));
+            
+            // Certifications
+            candidate.put("certifications", generateCertifications(certifications, 1 + (int)(Math.random() * 3)));
+            
+            // Languages
+            String[] languages = {"Serbian (native)", "English (fluent)", "German (intermediate)", "French (basic)"};
+            candidate.put("languages", languages[(int)(Math.random() * languages.length)]);
+            
+            // Registration date
+            candidate.put("registrationDate", generateRandomDateTime(2020, 2024));
+            candidate.put("created_at", generateRandomDateTime(2020, 2024));
             
             candidates.add(candidate);
         }
         
         return candidates;
     }
+    
+    private String determineCvTemplateType(String skills) {
+        String skillsLower = skills.toLowerCase();
+        if (skillsLower.contains("java") || skillsLower.contains("spring")) {
+            return "java";
+        } else if (skillsLower.contains("python") || skillsLower.contains("django") || skillsLower.contains("tensorflow")) {
+            return "python";
+        } else if (skillsLower.contains("react") || skillsLower.contains("javascript") || skillsLower.contains("frontend")) {
+            return "frontend";
+        } else if (skillsLower.contains("docker") || skillsLower.contains("kubernetes") || skillsLower.contains("aws")) {
+            return "devops";
+        } else if (skillsLower.contains("pandas") || skillsLower.contains("scikit") || skillsLower.contains("data")) {
+            return "data";
+        } else {
+            return "general";
+        }
+    }
+    
+    private String generateCvContent(String firstName, String lastName, String skills, String currentPosition, 
+                                   String company, int yearsExperience, String templateType) {
+        // Different CV templates based on template type determined from skills
+        String[] cvTemplates = getCvTemplates(templateType, skills);
+        String template = cvTemplates[(int)(Math.random() * cvTemplates.length)];
+        
+        // Generate a concise, natural CV text without structured sections
+        String cvText = template.replace("{firstName}", firstName)
+                               .replace("{lastName}", lastName)
+                               .replace("{position}", currentPosition)
+                               .replace("{years}", String.valueOf(yearsExperience))
+                               .replace("{company}", company)
+                               .replace("{skill1}", skills.split(", ")[0])
+                               .replace("{skill2}", skills.split(", ")[1])
+                               .replace("{skill3}", skills.split(", ").length > 2 ? skills.split(", ")[2] : "");
+        
+        // Add a natural continuation sentence about skills and experience
+        String[] skillSentences = {
+            " Proficient in " + skills.split(", ")[0] + " and " + skills.split(", ")[1] + " with hands-on experience in modern development practices.",
+            " Skilled in " + skills.split(", ")[0] + ", " + skills.split(", ")[1] + " and other cutting-edge technologies.",
+            " Experienced with " + skills.split(", ")[0] + " and " + skills.split(", ")[1] + " in enterprise environments.",
+            " Strong background in " + skills.split(", ")[0] + " and " + skills.split(", ")[1] + " with focus on scalable solutions.",
+            " Expertise in " + skills.split(", ")[0] + " and " + skills.split(", ")[1] + " with proven track record of delivering quality software."
+        };
+        
+        String skillSentence = skillSentences[(int)(Math.random() * skillSentences.length)];
+        
+        // Add experience context
+        String experienceContext = yearsExperience > 5 ? 
+            " With over " + yearsExperience + " years of experience, " + firstName + " has successfully led multiple projects and mentored junior developers." :
+            " Having " + yearsExperience + " years of experience, " + firstName + " brings fresh perspective and strong technical skills to any development team.";
+        
+        return cvText + skillSentence + experienceContext;
+    }
+    
+    private String[] getCvTemplates(String templateType, String skills) {
+        if ("java".equals(templateType)) {
+            return new String[]{
+                "Experienced {position} with {years} years of expertise in Java ecosystem and enterprise software development. " +
+                "Specialized in Spring Framework, microservices architecture, and cloud-native applications. " +
+                "Currently working at {company} where I lead development of scalable backend systems using {skill1}, {skill2}, and {skill3}. " +
+                "Passionate about clean code, design patterns, and mentoring junior developers.",
+                
+                "Senior {position} with {years} years of experience building robust Java applications and distributed systems. " +
+                "Expert in Spring Boot, RESTful APIs, and database optimization. " +
+                "At {company}, I architect and develop high-performance applications serving millions of users. " +
+                "Strong background in {skill1}, {skill2}, and agile development methodologies.",
+                
+                "Lead {position} with {years} years of experience in Java development and team leadership. " +
+                "Specialized in microservices, containerization, and DevOps practices. " +
+                "Currently at {company}, I design and implement enterprise-grade solutions using {skill1} and {skill2}. " +
+                "Committed to code quality, performance optimization, and continuous learning."
+            };
+        } else if ("python".equals(templateType)) {
+            return new String[]{
+                "Data-driven {position} with {years} years of experience in Python development and machine learning. " +
+                "Expert in data analysis, statistical modeling, and building scalable data pipelines. " +
+                "At {company}, I develop AI-powered solutions using {skill1}, {skill2}, and {skill3}. " +
+                "Passionate about turning data into actionable insights and business value.",
+                
+                "Senior {position} with {years} years of expertise in Python, data science, and backend development. " +
+                "Specialized in Django/FastAPI, machine learning algorithms, and cloud platforms. " +
+                "Currently at {company}, I build intelligent systems and data-driven applications. " +
+                "Strong background in {skill1}, {skill2}, and statistical analysis.",
+                
+                "Full-stack {position} with {years} years of experience in Python development and web technologies. " +
+                "Expert in building scalable web applications, APIs, and data processing systems. " +
+                "At {company}, I develop end-to-end solutions using {skill1}, {skill2}, and modern frameworks. " +
+                "Committed to writing clean, maintainable code and following best practices."
+            };
+        } else if ("frontend".equals(templateType)) {
+            return new String[]{
+                "Creative {position} with {years} years of experience in modern frontend development and user experience design. " +
+                "Expert in React, JavaScript, and responsive web design. " +
+                "At {company}, I create intuitive user interfaces and interactive web applications using {skill1}, {skill2}, and {skill3}. " +
+                "Passionate about user-centered design and performance optimization.",
+                
+                "Senior {position} with {years} years of expertise in frontend technologies and component-based architecture. " +
+                "Specialized in React ecosystem, TypeScript, and state management. " +
+                "Currently at {company}, I lead frontend development and mentor junior developers. " +
+                "Strong background in {skill1}, {skill2}, and modern build tools.",
+                
+                "Lead {position} with {years} years of experience in frontend development and team management. " +
+                "Expert in React, Vue.js, and cross-platform development. " +
+                "At {company}, I architect scalable frontend solutions and establish development standards. " +
+                "Committed to accessibility, performance, and code quality."
+            };
+        } else if ("devops".equals(templateType)) {
+            return new String[]{
+                "Infrastructure-focused {position} with {years} years of experience in cloud platforms and automation. " +
+                "Expert in Docker, Kubernetes, and CI/CD pipelines. " +
+                "At {company}, I manage cloud infrastructure and implement DevOps best practices using {skill1}, {skill2}, and {skill3}. " +
+                "Passionate about infrastructure as code and system reliability.",
+                
+                "Senior {position} with {years} years of expertise in cloud architecture and deployment automation. " +
+                "Specialized in AWS/Azure, containerization, and monitoring solutions. " +
+                "Currently at {company}, I design and maintain scalable cloud infrastructure. " +
+                "Strong background in {skill1}, {skill2}, and security best practices.",
+                
+                "Lead {position} with {years} years of experience in DevOps practices and team leadership. " +
+                "Expert in cloud platforms, automation tools, and system architecture. " +
+                "At {company}, I establish DevOps culture and implement modern deployment strategies. " +
+                "Committed to reliability, security, and continuous improvement."
+            };
+        } else if ("data".equals(templateType)) {
+            return new String[]{
+                "Analytical {position} with {years} years of experience in data science and machine learning. " +
+                "Expert in Python, statistical analysis, and predictive modeling. " +
+                "At {company}, I develop machine learning models and data-driven solutions using {skill1}, {skill2}, and {skill3}. " +
+                "Passionate about extracting insights from complex datasets and driving business decisions.",
+                
+                "Senior {position} with {years} years of expertise in data analysis and artificial intelligence. " +
+                "Specialized in deep learning, big data processing, and model deployment. " +
+                "Currently at {company}, I lead data science initiatives and mentor junior analysts. " +
+                "Strong background in {skill1}, {skill2}, and statistical methods.",
+                
+                "Lead {position} with {years} years of experience in data science and team management. " +
+                "Expert in machine learning, data engineering, and business intelligence. " +
+                "At {company}, I architect data solutions and establish analytics best practices. " +
+                "Committed to data quality, model accuracy, and stakeholder communication."
+            };
+        } else if ("general".equals(templateType)) {
+            return new String[]{
+                "Experienced {position} with {years} years of expertise in software development and technology leadership. " +
+                "Specialized in {skill1}, {skill2}, and modern development practices. " +
+                "Currently at {company}, I lead technical initiatives and deliver high-quality software solutions. " +
+                "Passionate about innovation, team collaboration, and continuous learning.",
+                
+                "Senior {position} with {years} years of experience in software engineering and project management. " +
+                "Expert in {skill1}, {skill2}, and agile methodologies. " +
+                "At {company}, I architect solutions and mentor development teams. " +
+                "Strong background in {skill1}, {skill2}, and system design.",
+                
+                "Lead {position} with {years} years of expertise in software development and team leadership. " +
+                "Specialized in {skill1}, {skill2}, and technical strategy. " +
+                "Currently at {company}, I drive technical excellence and innovation. " +
+                "Committed to code quality, team growth, and business impact."
+            };
+        } else {
+            // Fallback for any unexpected template types
+            return new String[]{
+                "Experienced {position} with {years} years of expertise in software development. " +
+                "Specialized in {skill1}, {skill2}, and modern development practices. " +
+                "Currently at {company}, I contribute to technical initiatives and deliver quality software solutions. " +
+                "Passionate about technology and continuous learning."
+            };
+        }
+    }
+    
+    
+    private List<Map<String, Object>> generateWorkExperiences(String[] companies, String[] jobTitles, int count) {
+        List<Map<String, Object>> experiences = new ArrayList<>();
+        
+        for (int i = 0; i < count; i++) {
+            Map<String, Object> exp = new HashMap<>();
+            exp.put("company", companies[i % companies.length]);
+            exp.put("position", jobTitles[i % jobTitles.length]);
+            exp.put("description", "Developed and maintained software applications using modern technologies. " +
+                    "Collaborated with team members to deliver high-quality solutions. " +
+                    "Participated in code reviews and technical discussions.");
+            exp.put("technologies", new String[]{"Java", "Spring Boot", "MySQL", "Docker", "Git"});
+            exp.put("startDate", generateRandomDate(2015, 2023));
+            exp.put("endDate", i == count - 1 ? null : generateRandomDate(2018, 2024));
+            exp.put("isCurrent", i == count - 1);
+            experiences.add(exp);
+        }
+        
+        return experiences;
+    }
+    
+    private List<Map<String, Object>> generateEducationHistory(String[] universities, String[] degreeTypes, 
+                                                              String[] fieldsOfStudy) {
+        List<Map<String, Object>> education = new ArrayList<>();
+        
+        Map<String, Object> degree = new HashMap<>();
+        degree.put("institution", universities[0]);
+        degree.put("degree", degreeTypes[0]);
+        degree.put("fieldOfStudy", fieldsOfStudy[0]);
+        degree.put("startDate", generateRandomDate(2010, 2018));
+        degree.put("endDate", generateRandomDate(2014, 2020));
+        degree.put("gpa", 3.0 + Math.random() * 1.5);
+        education.add(degree);
+        
+        return education;
+    }
+    
+    private List<String> generateCertifications(String[] certifications, int count) {
+        List<String> certs = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            certs.add(certifications[i % certifications.length]);
+        }
+        return certs;
+    }
+    
+    private String generateRandomDate(int startYear, int endYear) {
+        int year = startYear + (int)(Math.random() * (endYear - startYear + 1));
+        int month = 1 + (int)(Math.random() * 12);
+        int day = 1 + (int)(Math.random() * 28);
+        return String.format("%04d-%02d-%02d", year, month, day);
+    }
+    
+    private String generateRandomDateTime(int startYear, int endYear) {
+        int year = startYear + (int)(Math.random() * (endYear - startYear + 1));
+        int month = 1 + (int)(Math.random() * 12);
+        int day = 1 + (int)(Math.random() * 28);
+        int hour = (int)(Math.random() * 24);
+        int minute = (int)(Math.random() * 60);
+        return String.format("%04d-%02d-%02dT%02d:%02d:00", year, month, day, hour, minute);
+    }
 
     private List<Map<String, Object>> createJobAdvertisementsData() {
         List<Map<String, Object>> jobs = new ArrayList<>();
         
-        String[] titles = {"Senior Java Developer", "Python Backend Engineer", "Frontend React Developer",
-                          "Full Stack .NET Developer", "DevOps Engineer", "Data Scientist",
-                          "Mobile App Developer", "Cloud Solutions Architect", "QA Automation Engineer",
-                          "Product Manager"};
-        
-        String[] descriptions = {
-            "We are looking for an experienced Java developer to join our enterprise software team. " +
-            "You will work on microservices architecture, Spring Boot applications, and cloud-based solutions. " +
-            "The role involves designing REST APIs, working with MySQL databases, and collaborating with cross-functional teams.",
-            
-            "Join our Python team and work on exciting backend projects using Django and FastAPI. " +
-            "You will develop scalable web applications, work with PostgreSQL databases, and implement data processing pipelines. " +
-            "Experience with machine learning libraries and cloud deployment is a plus.",
-            
-            "Create amazing user interfaces with React and modern web technologies. " +
-            "You will work on responsive web applications, implement component libraries, and optimize performance. " +
-            "Strong experience with TypeScript, HTML/CSS, and modern build tools is required.",
-            
-            "Full stack development using .NET Core and modern frontend frameworks. " +
-            "You will build enterprise applications, work with SQL Server databases, and implement cloud solutions. " +
-            "Experience with Azure services and DevOps practices is highly valued.",
-            
-            "Manage our cloud infrastructure and deployment pipelines using Docker and Kubernetes. " +
-            "You will work with AWS/Azure services, implement monitoring solutions, and ensure high availability. " +
-            "Strong background in infrastructure as code and security best practices is essential.",
-            
-            "Analyze data and build machine learning models using Python and advanced analytics tools. " +
-            "You will work with large datasets, implement statistical models, and create data visualizations. " +
-            "Experience with Pandas, Scikit-learn, and business intelligence tools is required.",
-            
-            "Develop mobile applications for iOS and Android using React Native and Flutter. " +
-            "You will create cross-platform apps, implement native features, and optimize app performance. " +
-            "Strong focus on user experience and app store optimization is essential.",
-            
-            "Design and implement cloud-based solutions using AWS and Azure services. " +
-            "You will architect scalable systems, work with Terraform, and ensure security compliance. " +
-            "Experience with enterprise cloud migration and multi-cloud strategies is highly valued.",
-            
-            "Ensure quality through automated testing using Selenium and Cypress frameworks. " +
-            "You will develop test automation scripts, implement CI/CD pipelines, and perform performance testing. " +
-            "Strong background in quality assurance methodologies and continuous integration is required.",
-            
-            "Lead product development and strategy using agile methodologies and data-driven approaches. " +
-            "You will work with cross-functional teams, conduct user research, and drive product innovation. " +
-            "Strong analytical skills and experience with product management tools is essential."
+        String[] titles = {
+            "Senior Java Developer", "Python Backend Engineer", "Frontend React Developer",
+            "Full Stack .NET Developer", "DevOps Engineer", "Data Scientist",
+            "Mobile App Developer", "Cloud Solutions Architect", "QA Automation Engineer",
+            "Product Manager", "Software Architect", "Database Administrator",
+            "System Administrator", "Security Engineer", "UI/UX Designer",
+            "Business Analyst", "Project Manager", "Scrum Master", "Technical Lead",
+            "Machine Learning Engineer", "Blockchain Developer", "Game Developer",
+            "Embedded Systems Engineer", "Network Engineer", "IT Support Specialist",
+            "Cybersecurity Analyst", "Cloud Engineer", "Site Reliability Engineer",
+            "Data Engineer", "Backend Developer", "Frontend Developer", "Full Stack Developer"
         };
         
-        String[] requirements = {"Java 8+, Spring Boot, MySQL, 3+ years experience",
-                               "Python 3.8+, Django/FastAPI, PostgreSQL, 2+ years experience",
-                               "React, TypeScript, HTML/CSS, 2+ years experience",
-                               "C#, .NET Core, SQL Server, 3+ years experience",
-                               "Docker, Kubernetes, AWS/Azure, 4+ years experience",
-                               "Python, Pandas, Scikit-learn, 3+ years experience",
-                               "React Native, Flutter, 2+ years experience",
-                               "AWS, Azure, Terraform, 5+ years experience",
-                               "Selenium, Cypress, 2+ years experience",
-                               "Product management, Agile, 4+ years experience"};
+        String[] companies = {
+            "TechCorp", "InnovateSoft", "DataFlow", "CloudTech", "DevSolutions",
+            "AI Innovations", "MobileFirst", "CloudScale", "QualityAssured", "ProductPro",
+            "CodeCraft", "DataDriven", "CloudNative", "AgileWorks", "TechForward",
+            "InnovationLab", "DigitalCraft", "SmartTech", "FutureSoft", "EliteCode",
+            "ProDev", "TechMasters", "CodeGenius", "DataWise", "CloudPro",
+            "StartupX", "ScaleUp", "TechGiant", "InnovationHub", "DigitalFirst"
+        };
         
-        String[] companies = {"TechCorp", "InnovateSoft", "DataFlow", "CloudTech", "DevSolutions",
-                            "AI Innovations", "MobileFirst", "CloudScale", "QualityAssured", "ProductPro"};
+        String[] locations = {
+            "Belgrade", "Novi Sad", "Nis", "Kragujevac", "Subotica", "Remote", "Hybrid",
+            "Cacak", "Zrenjanin", "Pancevo", "Novi Pazar", "Kraljevo", "Smederevo",
+            "Leskovac", "Uzice", "Vranje", "Sabac", "Pozarevac", "Krusevac", "Sombor"
+        };
         
-        String[] locations = {"Belgrade", "Novi Sad", "Nis", "Remote", "Hybrid"};
+        String[] employmentTypes = {"Full-time", "Part-time", "Contract", "Freelance", "Internship"};
+        String[] experienceLevels = {"Junior", "Mid-level", "Senior", "Lead", "Principal"};
+        String[] industries = {
+            "Technology", "Finance", "Healthcare", "E-commerce", "Education", "Manufacturing",
+            "Consulting", "Media", "Gaming", "Telecommunications", "Automotive", "Energy"
+        };
         
-        for (int i = 0; i < 10; i++) {
+        // Generate 1000+ job postings
+        for (int i = 0; i < 1000; i++) {
             Map<String, Object> job = new HashMap<>();
-            job.put("title", titles[i]);
-            job.put("description", descriptions[i]);
-            job.put("requirements", requirements[i]);
-            job.put("location", locations[i % locations.length]);
-            job.put("salary_min", 80000 + (i * 10000));
-            job.put("salary_max", 120000 + (i * 15000));
-            job.put("company", companies[i]);
-            job.put("employment_type", i % 2 == 0 ? "Full-time" : "Contract");
-            job.put("experience_level", i < 3 ? "Junior" : i < 7 ? "Mid-level" : "Senior");
-            job.put("created_at", "2024-01-" + String.format("%02d", (i % 28) + 1) + "T09:00:00Z");
+            
+            String title = titles[(int)(Math.random() * titles.length)];
+            String company = companies[(int)(Math.random() * companies.length)];
+            String location = locations[(int)(Math.random() * locations.length)];
+            String industry = industries[(int)(Math.random() * industries.length)];
+            String employmentType = employmentTypes[(int)(Math.random() * employmentTypes.length)];
+            String experienceLevel = experienceLevels[(int)(Math.random() * experienceLevels.length)];
+            
+            // Required fields for JobPosting model
+            job.put("title", title);
+            job.put("description", generateJobDescription(title, company, industry, location));
+            job.put("department", company); // Use company as department
+            job.put("location", location);
+            job.put("experienceLevel", experienceLevel);
+            job.put("minYearsExperience", getMinYearsForLevel(experienceLevel));
+            job.put("maxYearsExperience", getMaxYearsForLevel(experienceLevel));
+            job.put("requiredSkills", generateRequiredSkills(title));
+            job.put("preferredSkills", generatePreferredSkills(title));
+            job.put("minSalary", 40000 + (int)(Math.random() * 120000));
+            job.put("maxSalary", 60000 + (int)(Math.random() * 150000));
+            job.put("employmentType", employmentType);
+            job.put("isActive", true);
+            job.put("postedDate", generateRandomDateTime(2023, 2024));
+            job.put("applicationDeadline", generateRandomDateTime(2024, 2025));
+            job.put("hrManagerId", "hr_" + (1 + (int)(Math.random() * 10)));
+            job.put("numberOfPositions", 1 + (int)(Math.random() * 5));
+            
+            // Additional fields
+            job.put("company", company);
+            job.put("industry", industry);
+            job.put("job_type", Math.random() < 0.5 ? "Permanent" : "Contract");
+            job.put("remote_allowed", Math.random() < 0.33);
+            job.put("benefits", generateBenefits());
+            job.put("skills_required", generateRequiredSkills(title));
+            job.put("posted_date", generateRandomDateTime(2023, 2024));
+            job.put("application_deadline", generateRandomDateTime(2024, 2025));
+            job.put("created_at", generateRandomDateTime(2023, 2024));
             
             jobs.add(job);
         }
         
         return jobs;
     }
+    
+    private String generateJobDescription(String title, String company, String industry, String location) {
+        // Generate concise, natural job descriptions without structured sections
+        String[] jobTemplates = getJobDescriptionTemplates(title, industry);
+        String template = jobTemplates[(int)(Math.random() * jobTemplates.length)];
+        
+        return template.replace("{company}", company)
+                      .replace("{industry}", industry.toLowerCase())
+                      .replace("{title}", title.toLowerCase())
+                      .replace("{location}", location);
+    }
+    
+    private String[] getJobDescriptionTemplates(String title, String industry) {
+        // Generate concise, natural job descriptions for all positions
+        String[] baseTemplates = {
+            "We are a leading {industry} company seeking a talented {title} to join our innovative team in {location}. " +
+            "We are looking for an experienced {title} who is passionate about technology and software development. " +
+            "You will work on cutting-edge projects using modern technologies and contribute to our platform's success. " +
+            "This role offers the opportunity to work with a talented team and grow your career in a dynamic environment. " +
+            "We offer competitive salary, flexible working arrangements, professional development opportunities and a collaborative work environment.",
+            
+            "Join {company} as a {title} and be part of our mission to revolutionize the {industry} sector through innovative technology solutions. " +
+            "We are seeking a skilled {title} to join our development team in {location}. " +
+            "You will be responsible for building high-quality applications and contributing to our platform's success. " +
+            "This is an excellent opportunity to work with modern technologies and grow your career in a dynamic environment. " +
+            "We offer attractive compensation package, health insurance, learning budget and flexible schedule.",
+            
+            "We are a data-driven {industry} company looking for a passionate {title} to join our team in {location} and help us build intelligent solutions. " +
+            "We are seeking a talented {title} who loves working with technology and building innovative systems. " +
+            "You will work on exciting projects involving modern development practices and cutting-edge technologies. " +
+            "This role offers the opportunity to work with a talented team and make a real impact. " +
+            "We offer competitive salary, flexible working arrangements, access to latest tools and professional development opportunities."
+        };
+        
+        return baseTemplates;
+    }
+    
+    
+    private List<String> generateBenefits() {
+        return List.of(
+            "Health Insurance", "Dental Insurance", "Vision Insurance", "Life Insurance",
+            "401(k) Matching", "Paid Time Off", "Flexible Schedule", "Remote Work",
+            "Professional Development", "Gym Membership", "Free Meals", "Transportation Allowance"
+        );
+    }
+    
+    private List<String> generateRequiredSkills(String title) {
+        if (title.toLowerCase().contains("java")) {
+            return List.of("Java", "Spring Boot", "MySQL", "Maven", "Git", "REST APIs");
+        } else if (title.toLowerCase().contains("python")) {
+            return List.of("Python", "Django", "FastAPI", "PostgreSQL", "Pandas", "NumPy");
+        } else if (title.toLowerCase().contains("react")) {
+            return List.of("React", "JavaScript", "TypeScript", "HTML", "CSS", "Node.js");
+        } else if (title.toLowerCase().contains("devops")) {
+            return List.of("Docker", "Kubernetes", "AWS", "Terraform", "Jenkins", "Linux");
+        } else if (title.toLowerCase().contains("data")) {
+            return List.of("Python", "SQL", "Pandas", "Scikit-learn", "TensorFlow", "Jupyter");
+        } else {
+            return List.of("Programming", "Problem Solving", "Teamwork", "Communication", "Agile", "Git");
+        }
+    }
+    
+    private List<String> generatePreferredSkills(String title) {
+        if (title.toLowerCase().contains("java")) {
+            return List.of("Microservices", "Docker", "Kubernetes", "Redis", "MongoDB", "Kafka");
+        } else if (title.toLowerCase().contains("python")) {
+            return List.of("Machine Learning", "Docker", "Kubernetes", "Redis", "MongoDB", "Celery");
+        } else if (title.toLowerCase().contains("react")) {
+            return List.of("Redux", "Next.js", "GraphQL", "Docker", "Jest", "Webpack");
+        } else if (title.toLowerCase().contains("devops")) {
+            return List.of("Prometheus", "Grafana", "ELK Stack", "Ansible", "Helm", "Istio");
+        } else if (title.toLowerCase().contains("data")) {
+            return List.of("Machine Learning", "Deep Learning", "Apache Spark", "Hadoop", "Docker", "Kubernetes");
+        } else {
+            return List.of("Leadership", "Mentoring", "Architecture", "Cloud Computing", "CI/CD", "Monitoring");
+        }
+    }
+    
+    private int getMinYearsForLevel(String experienceLevel) {
+        switch (experienceLevel.toLowerCase()) {
+            case "junior": return 0;
+            case "mid-level": return 2;
+            case "senior": return 5;
+            case "lead": return 7;
+            case "principal": return 10;
+            default: return 0;
+        }
+    }
+    
+    private int getMaxYearsForLevel(String experienceLevel) {
+        switch (experienceLevel.toLowerCase()) {
+            case "junior": return 2;
+            case "mid-level": return 5;
+            case "senior": return 8;
+            case "lead": return 12;
+            case "principal": return 15;
+            default: return 5;
+        }
+    }
 
     private List<Map<String, Object>> createApplicationsData() {
         List<Map<String, Object>> applications = new ArrayList<>();
         
-        String[] candidateIds = {"candidate_1", "candidate_2", "candidate_3", "candidate_4", "candidate_5",
-                                "candidate_6", "candidate_7", "candidate_8", "candidate_9", "candidate_10"};
+        String[] statuses = {"Applied", "Under Review", "Interview Scheduled", "Technical Interview", 
+                           "Final Interview", "Rejected", "Accepted", "Withdrawn", "On Hold"};
         
-        String[] jobIds = {"job_1", "job_2", "job_3", "job_4", "job_5",
-                          "job_6", "job_7", "job_8", "job_9", "job_10"};
+        String[] hrReviewers = {"John Smith", "Sarah Johnson", "Mike Davis", "Lisa Wilson", "Tom Brown",
+                               "Emma Taylor", "David Miller", "Anna Garcia", "Chris Anderson", "Maria Rodriguez"};
         
-        String[] statuses = {"Applied", "Under Review", "Interview Scheduled", "Rejected", "Accepted"};
-        
-        String[] coverLetters = {
-            "I am very interested in this position and believe my skills match your requirements perfectly. I have extensive experience in Java development and would love to contribute to your team.",
-            "With my background in software engineering and passion for technology, I am excited about the opportunity to join your company and work on innovative projects.",
-            "I am writing to express my strong interest in this role. My experience in full-stack development and problem-solving skills make me an ideal candidate for this position.",
-            "Having worked in the tech industry for several years, I am confident that I can bring valuable expertise and fresh perspectives to your development team.",
-            "I am enthusiastic about this opportunity and believe my technical skills and collaborative approach would be a great fit for your organization.",
-            "With my strong foundation in programming and eagerness to learn, I am excited about the possibility of contributing to your company's success.",
-            "I am very interested in this position and would love to discuss how my experience can benefit your team and help achieve your project goals.",
-            "My passion for technology and proven track record in software development make me an excellent candidate for this role.",
-            "I am excited about the opportunity to apply my skills and knowledge to contribute meaningfully to your team and company objectives.",
-            "With my technical expertise and strong work ethic, I am confident that I would be a valuable addition to your development team."
-        };
-        
-        for (int i = 0; i < 10; i++) {
+        // Generate 2000+ applications
+        for (int i = 0; i < 2000; i++) {
             Map<String, Object> application = new HashMap<>();
-            application.put("candidateId", candidateIds[i]);
-            application.put("jobPostingId", jobIds[i]);
-            application.put("status", statuses[i % statuses.length]);
-            application.put("coverLetter", coverLetters[i]);
-            application.put("appliedAt", "2024-01-" + String.format("%02d", (i % 28) + 1) + "T10:00:00Z");
+            
+            // Random candidate and job IDs
+            String candidateId = "candidate_" + (1 + (int)(Math.random() * 1200));
+            String jobId = "job_" + (1 + (int)(Math.random() * 1000));
+            
+            application.put("candidateId", candidateId);
+            application.put("jobPostingId", jobId);
+            application.put("status", statuses[(int)(Math.random() * statuses.length)]);
+            application.put("coverLetter", generateCoverLetter(i));
+            application.put("applicationDate", generateRandomDateTime(2023, 2024));
+            application.put("appliedAt", generateRandomDateTime(2023, 2024));
+            
+            // Match scores
+            application.put("overallMatchScore", Math.random() * 100);
+            application.put("skillMatchScore", Math.random() * 100);
+            application.put("experienceMatchScore", Math.random() * 100);
+            application.put("cvMatchScore", Math.random() * 100);
+            
+            // Additional fields
+            application.put("ranking", 1 + (int)(Math.random() * 100));
+            application.put("hrNotes", generateHrNotes(i));
+            application.put("reviewedBy", Math.random() < 0.33 ? hrReviewers[(int)(Math.random() * hrReviewers.length)] : null);
+            application.put("reviewDate", Math.random() < 0.33 ? generateRandomDateTime(2023, 2024) : null);
+            application.put("isShortlisted", Math.random() < 0.2);
             application.put("notes", "Application submitted through company website");
-            application.put("resumeUrl", "/resumes/candidate_" + (i + 1) + ".pdf");
-            application.put("portfolioUrl", "https://portfolio.com/candidate_" + (i + 1));
+            application.put("resumeUrl", "/resumes/" + candidateId + ".pdf");
+            application.put("portfolioUrl", "https://portfolio.com/" + candidateId);
+            application.put("linkedinUrl", "https://linkedin.com/in/" + candidateId);
+            application.put("githubUrl", "https://github.com/" + candidateId);
+            
+            // Interview details
+            String status = statuses[(int)(Math.random() * statuses.length)];
+            if (status.contains("Interview")) {
+                application.put("interviewDate", generateRandomDateTime(2024, 2025));
+                application.put("interviewType", Math.random() < 0.5 ? "Video Call" : "In-Person");
+                application.put("interviewer", hrReviewers[(int)(Math.random() * hrReviewers.length)]);
+            }
             
             applications.add(application);
         }
         
         return applications;
+    }
+    
+    private String generateCoverLetter(int index) {
+        String[] templates = {
+            "I am writing to express my strong interest in this position. With my extensive experience in software development and passion for technology, I believe I would be a valuable addition to your team. I am particularly excited about the opportunity to work on innovative projects and contribute to your company's success.",
+            
+            "I am very interested in this role and believe my skills and experience align perfectly with your requirements. Having worked in the tech industry for several years, I have developed strong technical abilities and collaborative skills that would make me an ideal candidate for this position.",
+            
+            "With my background in computer science and proven track record in software development, I am excited about the possibility of joining your team. I am confident that my technical expertise and problem-solving abilities would be a great fit for your organization.",
+            
+            "I am enthusiastic about this opportunity and would love to discuss how my experience can benefit your team. My strong foundation in programming and eagerness to learn make me an excellent candidate for this role.",
+            
+            "Having reviewed the job description, I am confident that my skills and experience make me a strong candidate for this position. I am particularly drawn to your company's innovative approach and would be thrilled to contribute to your ongoing projects.",
+            
+            "I am writing to apply for this position as I believe my technical skills and passion for software development align well with your requirements. I am excited about the opportunity to work with a dynamic team and contribute to meaningful projects.",
+            
+            "With my comprehensive background in software engineering and strong analytical skills, I am confident that I would be a valuable addition to your team. I am particularly interested in the technical challenges this role presents.",
+            
+            "I am very interested in this position and believe my experience in full-stack development and problem-solving skills make me an ideal candidate. I am excited about the opportunity to work on cutting-edge technologies and contribute to your company's growth.",
+            
+            "Having worked in various software development roles, I have gained valuable experience that I believe would be beneficial to your team. I am particularly drawn to your company's mission and would be honored to contribute to your success.",
+            
+            "I am writing to express my interest in this role as I believe my technical expertise and collaborative approach would be a great fit for your organization. I am excited about the opportunity to work on challenging projects and grow professionally."
+        };
+        
+        return templates[index % templates.length];
+    }
+    
+    private String generateHrNotes(int index) {
+        String[] notes = {
+            "Strong technical background, good communication skills",
+            "Excellent candidate, highly recommended for next round",
+            "Good experience but may need additional training",
+            "Outstanding technical skills, perfect cultural fit",
+            "Average candidate, consider for junior position",
+            "Excellent problem-solving abilities, strong team player",
+            "Good potential but lacks some required experience",
+            "Outstanding candidate, fast-track for final interview",
+            "Good technical skills, needs improvement in communication",
+            "Excellent cultural fit, strong technical background"
+        };
+        
+        return index % 3 == 0 ? notes[index % notes.length] : null;
     }
 
     private void addBatchToQdrant(String collection, List<Map<String, Object>> points) {
@@ -398,13 +869,5 @@ public class TestDataService {
         } catch (Exception e) {
             logger.warn("Failed to add data to Elasticsearch index {}: {}", index, e.getMessage());
         }
-    }
-
-    private List<Float> generateRandomVector(int size) {
-        List<Float> vector = new ArrayList<>();
-        for (int i = 0; i < size; i++) {
-            vector.add((float) (Math.random() * 2 - 1)); // Random values between -1 and 1
-        }
-        return vector;
     }
 }

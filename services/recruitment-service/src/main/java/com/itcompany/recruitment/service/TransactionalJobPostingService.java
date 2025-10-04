@@ -17,7 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -45,6 +47,10 @@ public class TransactionalJobPostingService {
 
     /**
      * SAGA STEP 1: Create job posting with transactional processing
+     * 1. Vectorize
+     * 2. Save to Elasticsearch
+     * 3. Save to Qdrant
+     * 4. Rollback if something fails
      */
     @Transactional
     public JobPosting createJobPosting(JobPosting jobPosting) {
@@ -53,26 +59,20 @@ public class TransactionalJobPostingService {
         try {
             logger.info("Starting transactional creation of job posting: {}", jobPosting.getTitle());
             
-            // STEP 1: Vector will be created when saving to Qdrant
-            if (jobPosting.getDescription() != null) {
-                logger.debug("Job description will be vectorized when saving to Qdrant");
-            }
+            // STEP 1: Set creation date
             jobPosting.setPostedDate(LocalDateTime.now());
-            if (jobPosting.getIsActive() == null) {
-                jobPosting.setIsActive(true);
-            }
             
             // STEP 2: Save to Elasticsearch (main database)
-            JobPosting savedJob = jobPostingRepository.save(jobPosting);
-            jobId = savedJob.getId();
+            JobPosting savedJobPosting = jobPostingRepository.save(jobPosting);
+            jobId = savedJobPosting.getId();
             logger.info("Job posting saved to Elasticsearch with ID: {}", jobId);
             
             // STEP 3: Save to Qdrant (vector database)
-            saveToQdrant(savedJob);
+            saveToQdrant(savedJobPosting);
             logger.info("Job posting saved to Qdrant successfully");
             
             logger.info("Transactional creation completed successfully for job posting: {}", jobId);
-            return savedJob;
+            return savedJobPosting;
             
         } catch (Exception e) {
             logger.error("Error in transactional creation of job posting: {}", e.getMessage(), e);
@@ -93,34 +93,26 @@ public class TransactionalJobPostingService {
 
     /**
      * SAGA STEP 2: Update job posting with transactional processing
+     * 1. Update in Elasticsearch
+     * 2. Update in Qdrant
+     * 3. Rollback if something fails
      */
     @Transactional
     public JobPosting updateJobPosting(String id, JobPosting jobPosting) {
         try {
             logger.info("Starting transactional update of job posting: {}", id);
             
-            // STEP 1: Check if job posting exists
-            Optional<JobPosting> existingOpt = jobPostingRepository.findById(id);
-            if (existingOpt.isEmpty()) {
-                throw new IllegalArgumentException("Job posting not found: " + id);
-            }
-            
-            // STEP 2: Vector will be created when saving to Qdrant (if description is changed)
-            if (jobPosting.getDescription() != null) {
-                logger.debug("Job description will be vectorized when saving to Qdrant");
-            }
+            // STEP 1: Update in Elasticsearch
             jobPosting.setId(id);
-            
-            // STEP 3: Update in Elasticsearch
-            JobPosting updatedJob = jobPostingRepository.save(jobPosting);
+            JobPosting updatedJobPosting = jobPostingRepository.save(jobPosting);
             logger.info("Job posting updated in Elasticsearch: {}", id);
             
-            // STEP 4: Update in Qdrant
-            updateInQdrant(updatedJob);
+            // STEP 2: Update in Qdrant
+            updateInQdrant(updatedJobPosting);
             logger.info("Job posting updated in Qdrant: {}", id);
             
             logger.info("Transactional update completed successfully for job posting: {}", id);
-            return updatedJob;
+            return updatedJobPosting;
             
         } catch (Exception e) {
             logger.error("Error in transactional update of job posting: {}", e.getMessage(), e);
@@ -130,6 +122,9 @@ public class TransactionalJobPostingService {
 
     /**
      * SAGA STEP 3: Delete job posting with transactional processing
+     * 1. Delete from Qdrant
+     * 2. Delete from Elasticsearch
+     * 3. Rollback if something fails
      */
     @Transactional
     public void deleteJobPosting(String id) {
@@ -137,9 +132,10 @@ public class TransactionalJobPostingService {
             logger.info("Starting transactional deletion of job posting: {}", id);
             
             // STEP 1: Check if job posting exists
-            Optional<JobPosting> existingOpt = jobPostingRepository.findById(id);
-            if (existingOpt.isEmpty()) {
-                throw new IllegalArgumentException("Job posting not found: " + id);
+            Optional<JobPosting> jobPosting = jobPostingRepository.findById(id);
+            if (jobPosting.isEmpty()) {
+                logger.warn("Job posting not found: {}", id);
+                return;
             }
             
             // STEP 2: Delete from Qdrant
@@ -166,27 +162,44 @@ public class TransactionalJobPostingService {
             String url = qdrantUrl + "/collections/job_advertisements/points";
             
             Map<String, Object> point = new HashMap<>();
-            point.put("id", jobPosting.getId());
-            point.put("vector", vectorizationService.vectorizeText(jobPosting.getDescription()));
+            logger.info("Converting Elasticsearch ID '{}' to Qdrant ID", jobPosting.getId());
+            int qdrantId = convertToNumericId(jobPosting.getId());
+            logger.info("Converted to Qdrant ID: {}", qdrantId);
+            point.put("id", qdrantId);
             
-            // Minimal payload for Qdrant
+            // Create combined vector from multiple fields (same logic as TestDataService)
+            String title = jobPosting.getTitle() != null ? jobPosting.getTitle() : "";
+            String description = jobPosting.getDescription() != null ? jobPosting.getDescription() : "";
+            String requirements = jobPosting.getDepartment() != null ? jobPosting.getDepartment() : "";
+            String skills = jobPosting.getRequiredSkills() != null ? String.join(", ", jobPosting.getRequiredSkills()) : "";
+            
+            // Create combined vector from multiple fields
+            String combinedText = title + " " + description + " " + requirements + " " + skills;
+            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
+            point.put("vector", combinedVector);
+            
+            // Store Elasticsearch ID in payload for mapping
             Map<String, Object> payload = new HashMap<>();
-            payload.put("id", jobPosting.getId());
+            payload.put("id", jobPosting.getId()); // Store Elasticsearch ID as 'id' for vector search compatibility
+            payload.put("qdrant_id", qdrantId); // Store numeric ID for reference
             payload.put("title", jobPosting.getTitle());
+            payload.put("description", jobPosting.getDescription());
+            payload.put("company", jobPosting.getDepartment());
             payload.put("location", jobPosting.getLocation());
-            payload.put("experienceLevel", jobPosting.getExperienceLevel());
-            payload.put("requiredSkills", jobPosting.getRequiredSkills());
-            payload.put("minSalary", jobPosting.getMinSalary());
-            payload.put("maxSalary", jobPosting.getMaxSalary());
-            payload.put("employmentType", jobPosting.getEmploymentType());
-            payload.put("isActive", jobPosting.getIsActive());
+            payload.put("skills_required", jobPosting.getRequiredSkills());
+            payload.put("salary_min", jobPosting.getMinSalary());
+            payload.put("salary_max", jobPosting.getMaxSalary());
+            payload.put("employment_type", jobPosting.getEmploymentType());
             
             point.put("payload", payload);
+            
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("points", Arrays.asList(point));
             
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(point, headers);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
             ResponseEntity<String> response = qdrantRestTemplate.exchange(
                 url, HttpMethod.PUT, request, String.class);
@@ -206,30 +219,56 @@ public class TransactionalJobPostingService {
      */
     private void updateInQdrant(JobPosting jobPosting) {
         try {
-            String url = qdrantUrl + "/collections/job_advertisements/points/" + jobPosting.getId();
+            // Find existing Qdrant ID by searching for job posting ID in payload
+            int qdrantId = findQdrantIdByJobPostingId(jobPosting.getId());
+            
+            if (qdrantId == -1) {
+                logger.warn("Job posting not found in Qdrant for update: {}, creating new entry", jobPosting.getId());
+                // If not found, create new entry
+                saveToQdrant(jobPosting);
+                return;
+            }
+            
+            // ISPRAVKA: Koristi PUT endpoint sa points array za update (isto kao za kreiranje)
+            String url = qdrantUrl + "/collections/job_advertisements/points";
             
             Map<String, Object> point = new HashMap<>();
-            point.put("id", jobPosting.getId());
-            point.put("vector", vectorizationService.vectorizeText(jobPosting.getDescription()));
+            point.put("id", qdrantId);
             
-            // Minimal payload for Qdrant
+            // Create combined vector from multiple fields (same logic as TestDataService)
+            String title = jobPosting.getTitle() != null ? jobPosting.getTitle() : "";
+            String description = jobPosting.getDescription() != null ? jobPosting.getDescription() : "";
+            String requirements = jobPosting.getDepartment() != null ? jobPosting.getDepartment() : "";
+            String skills = jobPosting.getRequiredSkills() != null ? String.join(", ", jobPosting.getRequiredSkills()) : "";
+            
+            // Create combined vector from multiple fields
+            String combinedText = title + " " + description + " " + requirements + " " + skills;
+            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
+            point.put("vector", combinedVector);
+            
+            // Store Elasticsearch ID in payload for mapping
             Map<String, Object> payload = new HashMap<>();
-            payload.put("id", jobPosting.getId());
+            payload.put("id", jobPosting.getId()); // Store Elasticsearch ID as 'id' for vector search compatibility
+            payload.put("qdrant_id", qdrantId); // Store numeric ID for reference
             payload.put("title", jobPosting.getTitle());
+            payload.put("description", jobPosting.getDescription());
+            payload.put("company", jobPosting.getDepartment());
             payload.put("location", jobPosting.getLocation());
-            payload.put("experienceLevel", jobPosting.getExperienceLevel());
-            payload.put("requiredSkills", jobPosting.getRequiredSkills());
-            payload.put("minSalary", jobPosting.getMinSalary());
-            payload.put("maxSalary", jobPosting.getMaxSalary());
-            payload.put("employmentType", jobPosting.getEmploymentType());
-            payload.put("isActive", jobPosting.getIsActive());
+            payload.put("skills_required", jobPosting.getRequiredSkills());
+            payload.put("salary_min", jobPosting.getMinSalary());
+            payload.put("salary_max", jobPosting.getMaxSalary());
+            payload.put("employment_type", jobPosting.getEmploymentType());
             
             point.put("payload", payload);
+            
+            // Kreiraj payload sa listom tačaka za update
+            Map<String, Object> updateRequest = new HashMap<>();
+            updateRequest.put("points", Arrays.asList(point));
             
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(point, headers);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(updateRequest, headers);
             
             ResponseEntity<String> response = qdrantRestTemplate.exchange(
                 url, HttpMethod.PUT, request, String.class);
@@ -247,23 +286,112 @@ public class TransactionalJobPostingService {
     /**
      * Delete job posting from Qdrant
      */
-    private void deleteFromQdrant(String jobId) {
+    private void deleteFromQdrant(String jobPostingId) {
         try {
-            String url = qdrantUrl + "/collections/job_advertisements/points/" + jobId;
+            // Find Qdrant ID by searching for job posting ID in payload
+            int qdrantId = findQdrantIdByJobPostingId(jobPostingId);
+            
+            if (qdrantId == -1) {
+                logger.warn("Job posting not found in Qdrant: {}", jobPostingId);
+                return; // Not found, but don't fail the operation
+            }
+            
+            // ISPRAVKA: Koristi POST endpoint sa points array
+            String url = qdrantUrl + "/collections/job_advertisements/points/delete";
+            
+            // Kreiraj payload sa listom ID-jeva za brisanje
+            Map<String, Object> deleteRequest = new HashMap<>();
+            deleteRequest.put("points", Arrays.asList(qdrantId));
             
             HttpHeaders headers = new HttpHeaders();
-            HttpEntity<Void> request = new HttpEntity<>(headers);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(deleteRequest, headers);
             
             ResponseEntity<String> response = qdrantRestTemplate.exchange(
-                url, HttpMethod.DELETE, request, String.class);
+                url, HttpMethod.POST, request, String.class);
             
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("Failed to delete from Qdrant: " + response.getStatusCode());
+            if (response.getStatusCode().is2xxSuccessful()) {
+                logger.info("Successfully deleted job posting from Qdrant: {} (Qdrant ID: {})", jobPostingId, qdrantId);
+            } else {
+                logger.warn("Failed to delete from Qdrant: {} - {}", response.getStatusCode(), response.getBody());
+                throw new RuntimeException("Failed to delete job posting from Qdrant: " + response.getStatusCode());
             }
             
         } catch (Exception e) {
             logger.error("Error deleting job posting from Qdrant: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to delete job posting from Qdrant", e);
+        }
+    }
+    
+    /**
+     * Find Qdrant ID by searching for job posting ID in payload
+     */
+    private int findQdrantIdByJobPostingId(String jobPostingId) {
+        try {
+            logger.info("Finding Qdrant ID for job posting: {}", jobPostingId);
+            String url = qdrantUrl + "/collections/job_advertisements/points/scroll";
+            
+            Map<String, Object> scrollRequest = new HashMap<>();
+            scrollRequest.put("limit", 10000); // Get all points
+            scrollRequest.put("with_payload", true);
+            scrollRequest.put("with_vector", false);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(scrollRequest, headers);
+            
+            @SuppressWarnings("rawtypes")
+            ResponseEntity<Map> response = qdrantRestTemplate.exchange(
+                url, HttpMethod.POST, request, Map.class);
+            
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> responseBody = response.getBody();
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = (Map<String, Object>) responseBody.get("result");
+                
+                if (result != null && result.containsKey("points")) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> points = (List<Map<String, Object>>) result.get("points");
+                    
+                    for (Map<String, Object> point : points) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> payload = (Map<String, Object>) point.get("payload");
+                        if (payload != null && jobPostingId.equals(payload.get("id"))) {
+                            // Return the Qdrant ID (point ID), not the payload ID
+                            int qdrantId = (Integer) point.get("id");
+                            logger.info("Found Qdrant ID {} for job posting {}", qdrantId, jobPostingId);
+                            return qdrantId;
+                        }
+                    }
+                }
+            }
+            
+            return -1; // Not found
+            
+        } catch (Exception e) {
+            logger.error("Error finding Qdrant ID for job posting ID {}: {}", jobPostingId, e.getMessage());
+            return -1;
+        }
+    }
+    
+    /**
+     * Convert any ID to numeric ID for Qdrant
+     */
+    private int convertToNumericId(String jobPostingId) {
+        try {
+            if (jobPostingId.startsWith("job_")) {
+                // For test data format: job_1 -> 1
+                String numericPart = jobPostingId.substring("job_".length());
+                return Integer.parseInt(numericPart);
+            } else {
+                // For UUID or other formats: use hash but ensure positive
+                return Math.abs(jobPostingId.hashCode());
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Could not convert ID to numeric: {}, using hash fallback", jobPostingId);
+            return Math.abs(jobPostingId.hashCode());
         }
     }
 }

@@ -2,7 +2,6 @@ package com.itcompany.recruitment.service;
 
 import com.itcompany.recruitment.dto.JobSearchRequest;
 import com.itcompany.recruitment.model.JobPosting;
-import com.itcompany.recruitment.model.qdrant.JobPostingVector;
 import com.itcompany.recruitment.repository.JobPostingRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,10 +13,6 @@ import org.springframework.data.elasticsearch.core.query.Query;
 import org.springframework.data.elasticsearch.core.query.CriteriaQuery;
 import org.springframework.data.elasticsearch.core.query.Criteria;
 import org.springframework.stereotype.Service;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -30,101 +25,38 @@ public class JobPostingService {
     private final VectorizationService vectorizationService;
     private final ElasticsearchOperations elasticsearchOperations;
     private final QdrantService qdrantService;
-    private final ObjectMapper objectMapper;
+    private final TransactionalJobPostingService transactionalJobPostingService;
 
     public JobPostingService(JobPostingRepository jobPostingRepository,
                              VectorizationService vectorizationService,
                              ElasticsearchOperations elasticsearchOperations,
-                             QdrantService qdrantService) {
+                             QdrantService qdrantService,
+                             TransactionalJobPostingService transactionalJobPostingService) {
         this.jobPostingRepository = jobPostingRepository;
         this.vectorizationService = vectorizationService;
         this.elasticsearchOperations = elasticsearchOperations;
         this.qdrantService = qdrantService;
-        this.objectMapper = new ObjectMapper();
+        this.transactionalJobPostingService = transactionalJobPostingService;
     }
 
     // CRUD
     public JobPosting createJobPosting(JobPosting jobPosting) {
-        jobPosting.setPostedDate(LocalDateTime.now());
-        if (jobPosting.getIsActive() == null) {
-            jobPosting.setIsActive(true);
-        }
-        
-        // Save to Elasticsearch (without vectors)
-        JobPosting savedJobPosting = jobPostingRepository.save(jobPosting);
-        
-        // Create and store vectors in Qdrant
-        try {
-            float[] descriptionVector = jobPosting.getDescription() != null ? 
-                vectorizationService.vectorizeText(jobPosting.getDescription()) : new float[384];
-            
-            String requiredSkillsJson = jobPosting.getRequiredSkills() != null ? 
-                objectMapper.writeValueAsString(jobPosting.getRequiredSkills()) : "[]";
-            String preferredSkillsJson = jobPosting.getPreferredSkills() != null ? 
-                objectMapper.writeValueAsString(jobPosting.getPreferredSkills()) : "[]";
-            
-            JobPostingVector jobPostingVector = new JobPostingVector(
-                savedJobPosting.getId(),
-                descriptionVector,
-                jobPosting.getDescription(),
-                jobPosting.getTitle(),
-                requiredSkillsJson,
-                preferredSkillsJson
-            );
-            
-            qdrantService.storeJobPostingVector(jobPostingVector);
-            logger.info("Successfully stored job posting vectors for ID: {}", savedJobPosting.getId());
-            
-        } catch (JsonProcessingException e) {
-            logger.error("Error serializing skills for job posting: {}", savedJobPosting.getId(), e);
-        } catch (Exception e) {
-            logger.error("Error storing job posting vectors for ID: {}", savedJobPosting.getId(), e);
-        }
-        
-        return savedJobPosting;
+        // Use transactional service for CRUD operations
+        return transactionalJobPostingService.createJobPosting(jobPosting);
     }
 
     public JobPosting updateJobPosting(String id, JobPosting jobPosting) {
-        jobPosting.setId(id);
-        
-        // Update in Elasticsearch (without vectors)
-        JobPosting updatedJobPosting = jobPostingRepository.save(jobPosting);
-        
-        // Update vectors in Qdrant if description changed
-        try {
-            float[] descriptionVector = jobPosting.getDescription() != null ? 
-                vectorizationService.vectorizeText(jobPosting.getDescription()) : new float[384];
-            
-            String requiredSkillsJson = jobPosting.getRequiredSkills() != null ? 
-                objectMapper.writeValueAsString(jobPosting.getRequiredSkills()) : "[]";
-            String preferredSkillsJson = jobPosting.getPreferredSkills() != null ? 
-                objectMapper.writeValueAsString(jobPosting.getPreferredSkills()) : "[]";
-            
-            JobPostingVector jobPostingVector = new JobPostingVector(
-                updatedJobPosting.getId(),
-                descriptionVector,
-                jobPosting.getDescription(),
-                jobPosting.getTitle(),
-                requiredSkillsJson,
-                preferredSkillsJson
-            );
-            
-            qdrantService.storeJobPostingVector(jobPostingVector);
-            logger.info("Successfully updated job posting vectors for ID: {}", updatedJobPosting.getId());
-            
-        } catch (Exception e) {
-            logger.error("Error updating job posting vectors for ID: {}", updatedJobPosting.getId(), e);
-        }
-        
-        return updatedJobPosting;
+        // Use transactional service for CRUD operations
+        return transactionalJobPostingService.updateJobPosting(id, jobPosting);
     }
 
     public Optional<JobPosting> findById(String id) {
         return jobPostingRepository.findById(id);
     }
-
+    
     public void deleteJobPosting(String id) {
-        jobPostingRepository.deleteById(id);
+        // Use transactional service for CRUD operations
+        transactionalJobPostingService.deleteJobPosting(id);
     }
 
     public List<JobPosting> findAll() {
@@ -141,67 +73,212 @@ public class JobPostingService {
         return jobPostingRepository.findByDepartment(department);
     }
 
-    // Search jobs for a candidate profile/text (hybrid vector + filters)
-    public List<JobPosting> searchJobs(JobSearchRequest request) {
-        Criteria criteria = new Criteria();
-
+    // Simple search with basic filtering
+    public List<JobPosting> simpleSearchJobs(JobSearchRequest request) {
+        // Start with an empty criteria
+        Criteria criteria = null;
+        boolean hasFilters = false;
+        
+        // Add filters based on provided criteria
         if (request.getSkills() != null && !request.getSkills().isEmpty()) {
-            criteria.and("requiredSkills").in(request.getSkills());
+            Criteria skillsCriteria = Criteria.where("requiredSkills").in(request.getSkills());
+            criteria = (criteria == null) ? skillsCriteria : criteria.and(skillsCriteria);
+            hasFilters = true;
         }
-        if (request.getLocation() != null) {
-            criteria.and("location").is(request.getLocation());
+        
+        if (request.getLocation() != null && !request.getLocation().trim().isEmpty()) {
+            Criteria locationCriteria = Criteria.where("location").is(request.getLocation());
+            criteria = (criteria == null) ? locationCriteria : criteria.and(locationCriteria);
+            hasFilters = true;
         }
-        if (request.getExperienceLevel() != null) {
-            criteria.and("experienceLevel").is(request.getExperienceLevel());
+        
+        if (request.getExperienceLevel() != null && !request.getExperienceLevel().trim().isEmpty()) {
+            Criteria expLevelCriteria = Criteria.where("experienceLevel").is(request.getExperienceLevel());
+            criteria = (criteria == null) ? expLevelCriteria : criteria.and(expLevelCriteria);
+            hasFilters = true;
         }
-        if (request.getEmploymentType() != null) {
-            criteria.and("employmentType").is(request.getEmploymentType());
+        
+        if (request.getEmploymentType() != null && !request.getEmploymentType().trim().isEmpty()) {
+            Criteria empTypeCriteria = Criteria.where("employmentType").is(request.getEmploymentType());
+            criteria = (criteria == null) ? empTypeCriteria : criteria.and(empTypeCriteria);
+            hasFilters = true;
         }
+        
         if (request.getMinSalary() != null) {
-            criteria.and("minSalary").greaterThanEqual(request.getMinSalary());
+            Criteria salaryCriteria = Criteria.where("minSalary").greaterThanEqual(request.getMinSalary());
+            criteria = (criteria == null) ? salaryCriteria : criteria.and(salaryCriteria);
+            hasFilters = true;
         }
-
+        
+        if (request.getMinMatchScore() != null) {
+            // This would require a custom field or calculation
+            logger.warn("MinMatchScore filtering not implemented for job postings");
+        }
+        
+        // Always filter for active job postings
+        Criteria activeCriteria = Criteria.where("isActive").is(true);
+        criteria = (criteria == null) ? activeCriteria : criteria.and(activeCriteria);
+        hasFilters = true;
+        
+        // If no other filters provided, still search for active jobs
+        if (!hasFilters) {
+            logger.warn("No search criteria provided, returning active job postings only");
+        }
+        
         Query query = new CriteriaQuery(criteria)
             .setPageable(PageRequest.of(0, Optional.ofNullable(request.getMaxResults()).orElse(20)));
-
-        SearchHits<JobPosting> hits = elasticsearchOperations.search(query, JobPosting.class);
-        List<JobPosting> results = hits.stream().map(SearchHit::getContent).collect(Collectors.toList());
-
-        // Vector search by candidate CV text against job description vectors using Qdrant
-        if (request.getCandidateCvText() != null && !request.getCandidateCvText().isEmpty()) {
-            try {
-                float[] searchVector = vectorizationService.vectorizeText(request.getCandidateCvText());
-                List<JobPostingVector> similarVectors = qdrantService.searchSimilarJobPostings(searchVector, 50);
+        
+        logger.info("Searching job postings with criteria: {}", criteria.toString());
+        
+        try {
+            SearchHits<JobPosting> searchHits = elasticsearchOperations.search(
+                query, 
+                JobPosting.class
+            );
+            
+            List<JobPosting> results = searchHits.stream()
+                .map(SearchHit::getContent)
+                .collect(Collectors.toList());
                 
-                // Create a map of job posting IDs to their vector similarity scores
-                Map<String, Double> vectorScores = new HashMap<>();
-                similarVectors.forEach(jpv -> {
-                    // Use a placeholder score - in real implementation, Qdrant returns similarity scores
-                    vectorScores.put(jpv.getJobPostingId(), 0.8);
-                });
-                
-                // Sort results by vector similarity
-                results.sort((a, b) -> {
-                    Double scoreA = vectorScores.getOrDefault(a.getId(), 0.0);
-                    Double scoreB = vectorScores.getOrDefault(b.getId(), 0.0);
-                    return Double.compare(scoreB, scoreA);
-                });
-                
-            } catch (Exception e) {
-                logger.error("Error in vector search for job postings", e);
-            }
+            logger.info("Found {} job postings matching criteria", results.size());
+            
+            return results;
+        } catch (Exception e) {
+            logger.error("Error searching job postings: {}", e.getMessage(), e);
+            return new ArrayList<>();
         }
-
+    }
+    
+    // Hybrid search combining vector search with filtering
+    public List<JobPosting> hybridSearchJobs(JobSearchRequest request) {
+        List<JobPosting> results = new ArrayList<>();
+        try {
+            // Step 1: Use Qdrant for vector similarity search if candidate CV text is provided
+            if (request.getCandidateCvText() != null && !request.getCandidateCvText().trim().isEmpty()) {
+                float[] searchVector = vectorizationService.vectorizeText(request.getCandidateCvText());
+                List<Double> searchVectorList = new ArrayList<>();
+                for (float f : searchVector) {
+                    searchVectorList.add((double) f);
+                }
+                List<Map<String, Object>> similarJobPostings = qdrantService.searchSimilarJobPostings(searchVectorList, 50);
+                
+                // Step 2: Get job posting IDs from vector search results
+                Set<String> jobPostingIds = similarJobPostings.stream()
+                    .map(jobPosting -> (String) jobPosting.get("id"))
+                    .collect(Collectors.toSet());
+                
+                // Step 3: Use Elasticsearch for structured filtering on similar job postings
+                if (!jobPostingIds.isEmpty()) {
+                    Criteria criteria = new Criteria("id").in(jobPostingIds);
+                    
+                    // Add additional filters
+                    if (request.getLocation() != null) {
+                        criteria = criteria.and(new Criteria("location").is(request.getLocation()));
+                    }
+                    if (request.getExperienceLevel() != null) {
+                        criteria = criteria.and(new Criteria("experienceLevel").is(request.getExperienceLevel()));
+                    }
+                    if (request.getEmploymentType() != null) {
+                        criteria = criteria.and(new Criteria("employmentType").is(request.getEmploymentType()));
+                    }
+                    if (request.getMinSalary() != null) {
+                        criteria = criteria.and(new Criteria("minSalary").greaterThanEqual(request.getMinSalary()));
+                    }
+                    
+                    // Always filter for active jobs
+                    criteria = criteria.and(new Criteria("isActive").is(true));
+                    
+                    Query query = new CriteriaQuery(criteria)
+                        .setPageable(PageRequest.of(0, Optional.ofNullable(request.getMaxResults()).orElse(20)));
+                    
+                    SearchHits<JobPosting> searchHits = elasticsearchOperations.search(query, JobPosting.class);
+                    
+                    results = searchHits.stream()
+                        .map(SearchHit::getContent)
+                        .collect(Collectors.toList());
+                    
+                    // Step 4: Recalculate match scores from Qdrant results
+                    Map<String, Double> vectorScores = new HashMap<>();
+                    similarJobPostings.forEach(jobPosting -> {
+                        // Calculate similarity score (simplified)
+                        vectorScores.put((String) jobPosting.get("id"), 0.8); // Placeholder score
+                    });
+                    
+                    results.forEach(jobPosting -> {
+                        Double score = vectorScores.get(jobPosting.getId());
+                        if (score != null) {
+                            // You might want to add a matchScore field to JobPosting model
+                            // jobPosting.setMatchScore(score);
+                        }
+                    });
+                    
+                    // Sort by match score
+                    results.sort((a, b) -> {
+                        Double scoreA = vectorScores.getOrDefault(a.getId(), 0.0);
+                        Double scoreB = vectorScores.getOrDefault(b.getId(), 0.0);
+                        return Double.compare(scoreB, scoreA);
+                    });
+                }
+            } else {
+                // Fallback to simple search if no candidate CV text provided
+                return simpleSearchJobs(request);
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error in hybrid search for job postings", e);
+            // Fallback to simple search
+            return simpleSearchJobs(request);
+        }
         return results;
     }
     
-    // Helper method for vector similarity (now using Qdrant)
-    private double calculateVectorSimilarity(float[] vec1, float[] vec2) {
-        if (vec1 == null || vec2 == null) {
-            return 0.0;
-        }
-        return vectorizationService.calculateCosineSimilarity(vec1, vec2);
+    // Legacy method for backward compatibility
+    public List<JobPosting> searchJobs(JobSearchRequest request) {
+        return hybridSearchJobs(request);
     }
+    
+    // Search jobs by department with filtering
+    public List<JobPosting> searchJobsByDepartment(String department, JobSearchRequest request) {
+        // Create a new request with department filter
+        JobSearchRequest departmentRequest = new JobSearchRequest();
+        departmentRequest.setSkills(request.getSkills());
+        departmentRequest.setLocation(request.getLocation());
+        departmentRequest.setExperienceLevel(request.getExperienceLevel());
+        departmentRequest.setEmploymentType(request.getEmploymentType());
+        departmentRequest.setMinSalary(request.getMinSalary());
+        departmentRequest.setCandidateCvText(request.getCandidateCvText());
+        departmentRequest.setMaxResults(request.getMaxResults());
+        
+        // Add department filter
+        Criteria criteria = new Criteria("department").is(department);
+        criteria = criteria.and(new Criteria("isActive").is(true));
+        
+        Query query = new CriteriaQuery(criteria)
+            .setPageable(PageRequest.of(0, Optional.ofNullable(request.getMaxResults()).orElse(20)));
+        
+        try {
+            SearchHits<JobPosting> searchHits = elasticsearchOperations.search(query, JobPosting.class);
+            return searchHits.stream()
+                .map(SearchHit::getContent)
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.error("Error searching jobs by department: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+    
+    // Search jobs by location with filtering
+    public List<JobPosting> searchJobsByLocation(String location, JobSearchRequest request) {
+        request.setLocation(location);
+        return simpleSearchJobs(request);
+    }
+    
+    // Search jobs by experience level with filtering
+    public List<JobPosting> searchJobsByExperienceLevel(String experienceLevel, JobSearchRequest request) {
+        request.setExperienceLevel(experienceLevel);
+        return simpleSearchJobs(request);
+    }
+    
 }
 
 

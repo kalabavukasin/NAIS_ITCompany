@@ -86,4 +86,41 @@ public class CandidateController {
             @PathVariable String jobPostingId) {
         return ResponseEntity.ok(candidateService.rankCandidates(jobPostingId));
     }
+    
+    @PostMapping("/search-with-vector")
+    @Operation(summary = "Search candidates with vector and filters")
+    public ResponseEntity<List<Candidate>> searchCandidatesWithVectorAndFilters(
+            @RequestBody CandidateSearchRequest request) {
+        return ResponseEntity.ok(candidateService.searchCandidatesWithVectorAndFilters(request));
+    }
+    
+    @PostMapping("/hybrid-search-advanced")
+    @Operation(summary = "Advanced hybrid search with complex filters")
+    public ResponseEntity<List<Candidate>> hybridSearchAdvanced(
+            @RequestBody CandidateSearchRequest request) {
+        return ResponseEntity.ok(candidateService.hybridSearch(request));
+    }
+    
+    @GetMapping("/count-by-location/{location}")
+    @Operation(summary = "Count candidates by location")
+    public ResponseEntity<Long> countByLocation(@PathVariable String location) {
+        return ResponseEntity.ok(candidateService.countByLocation(location));
+    }
+    
+    @PostMapping("/single-vector-search")
+    @Operation(summary = "Single vector search")
+    public ResponseEntity<List<Candidate>> singleVectorSearch(
+            @RequestParam String cvText) {
+        return ResponseEntity.ok(candidateService.singleVectorSearch(cvText));
+    }
+    
+    @PostMapping("/search-candidates")
+    @Operation(summary = "Search candidates with basic parameters")
+    public ResponseEntity<List<Candidate>> searchCandidatesBasic(
+            @RequestParam(required = false) String searchText,
+            @RequestParam(required = false) List<String> skills,
+            @RequestParam(required = false) String location,
+            @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(candidateService.searchCandidates(searchText, skills, location, limit));
+    }
 }

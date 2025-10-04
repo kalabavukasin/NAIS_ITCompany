@@ -76,4 +76,27 @@ public class ApplicationController {
         return ResponseEntity.ok(applicationService.getApplicationStatistics(jobPostingId));
     }
     
+    // Additional CRUD endpoints
+    @PutMapping("/{id}")
+    @Operation(summary = "Update application")
+    public ResponseEntity<Application> updateApplication(
+            @PathVariable String id,
+            @RequestBody Application application) {
+        return ResponseEntity.ok(applicationService.updateApplication(id, application));
+    }
+    
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete application")
+    public ResponseEntity<Void> deleteApplication(@PathVariable String id) {
+        applicationService.deleteApplication(id);
+        return ResponseEntity.noContent().build();
+    }
+    
+    @PostMapping("/create")
+    @Operation(summary = "Create new application")
+    public ResponseEntity<Application> createApplication(@RequestBody Application application) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(applicationService.createApplication(application));
+    }
+    
 }

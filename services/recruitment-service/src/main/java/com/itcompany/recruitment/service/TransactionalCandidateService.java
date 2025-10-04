@@ -17,7 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -67,8 +69,10 @@ public class TransactionalCandidateService {
             candidate.setRegistrationDate(LocalDateTime.now());
             
             // STEP 2: Save to Elasticsearch (main database)
+            logger.info("Before save - Candidate ID: {}", candidate.getId());
             Candidate savedCandidate = candidateRepository.save(candidate);
             candidateId = savedCandidate.getId();
+            logger.info("After save - Candidate ID: {}", candidateId);
             logger.info("Candidate saved to Elasticsearch with ID: {}", candidateId);
             
             // STEP 3: Save to Qdrant (vector database)
@@ -173,17 +177,27 @@ public class TransactionalCandidateService {
             String url = qdrantUrl + "/collections/candidates/points";
             
             Map<String, Object> point = new HashMap<>();
-            point.put("id", candidate.getId());
-            // Combine CV and skills vectors
-            float[] combinedVector = combineVectors(
-                vectorizationService.vectorizeText(candidate.getCvContent()),
-                candidate.getSkills() != null ? vectorizationService.vectorizeSkills(candidate.getSkills()) : new float[384]
-            );
+            // Use Elasticsearch ID as Qdrant ID (convert to numeric if needed)
+            logger.info("Converting Elasticsearch ID '{}' to Qdrant ID", candidate.getId());
+            int qdrantId = convertToNumericId(candidate.getId());
+            logger.info("Converted to Qdrant ID: {}", qdrantId);
+            point.put("id", qdrantId);
+            
+            // Create combined vector from multiple fields (same logic as TestDataService)
+            String cvContent = candidate.getCvContent() != null ? candidate.getCvContent() : "";
+            String skills = candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "";
+            String workExperience = generateWorkExperienceText(candidate);
+            
+            // Create combined vector from multiple fields
+            String combinedText = cvContent + " " + skills + " " + workExperience;
+            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
             point.put("vector", combinedVector);
             
-            // Minimal payload for Qdrant
+            // Store Elasticsearch ID in payload for mapping
             Map<String, Object> payload = new HashMap<>();
-            payload.put("id", candidate.getId());
+            payload.put("id", candidate.getId()); // Store Elasticsearch ID as 'id' for vector search compatibility
+          //  payload.put("elasticsearch_id", candidate.getId()); // Store original Elasticsearch ID for backward compatibility
+            payload.put("qdrant_id", qdrantId); // Store numeric ID for reference
             payload.put("name", candidate.getFirstName() + " " + candidate.getLastName());
             payload.put("email", candidate.getEmail());
             payload.put("skills", candidate.getSkills());
@@ -192,10 +206,14 @@ public class TransactionalCandidateService {
             
             point.put("payload", payload);
             
+            // Wrap point in PointInsertOperations format
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("points", Arrays.asList(point));
+            
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(point, headers);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
             ResponseEntity<String> response = qdrantRestTemplate.exchange(
                 url, HttpMethod.PUT, request, String.class);
@@ -215,20 +233,37 @@ public class TransactionalCandidateService {
      */
     private void updateInQdrant(Candidate candidate) {
         try {
-            String url = qdrantUrl + "/collections/candidates/points/" + candidate.getId();
+            // Find existing Qdrant ID by searching for candidate ID in payload
+            int qdrantId = findQdrantIdByCandidateId(candidate.getId());
+            
+            if (qdrantId == -1) {
+                logger.warn("Candidate not found in Qdrant for update: {}, creating new entry", candidate.getId());
+                // If not found, create new entry
+                saveToQdrant(candidate);
+                return;
+            }
+            
+            // ISPRAVKA: Koristi PUT endpoint sa points array za update (isto kao za kreiranje)
+            String url = qdrantUrl + "/collections/candidates/points";
             
             Map<String, Object> point = new HashMap<>();
-            point.put("id", candidate.getId());
-            // Combine CV and skills vectors
-            float[] combinedVector = combineVectors(
-                vectorizationService.vectorizeText(candidate.getCvContent()),
-                candidate.getSkills() != null ? vectorizationService.vectorizeSkills(candidate.getSkills()) : new float[384]
-            );
+            point.put("id", qdrantId);
+            
+            // Create combined vector from multiple fields (same logic as TestDataService)
+            String cvContent = candidate.getCvContent() != null ? candidate.getCvContent() : "";
+            String skills = candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "";
+            String workExperience = generateWorkExperienceText(candidate);
+            
+            // Create combined vector from multiple fields
+            String combinedText = cvContent + " " + skills + " " + workExperience;
+            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
             point.put("vector", combinedVector);
             
-            // Minimal payload for Qdrant
+            // Store Elasticsearch ID in payload for mapping
             Map<String, Object> payload = new HashMap<>();
-            payload.put("id", candidate.getId());
+            payload.put("id", candidate.getId()); // Store Elasticsearch ID as 'id' for vector search compatibility
+          //  payload.put("elasticsearch_id", candidate.getId()); // Store original Elasticsearch ID for backward compatibility
+            payload.put("qdrant_id", qdrantId); // Store numeric ID for reference
             payload.put("name", candidate.getFirstName() + " " + candidate.getLastName());
             payload.put("email", candidate.getEmail());
             payload.put("skills", candidate.getSkills());
@@ -237,10 +272,14 @@ public class TransactionalCandidateService {
             
             point.put("payload", payload);
             
+            // Kreiraj payload sa listom tačaka za update
+            Map<String, Object> updateRequest = new HashMap<>();
+            updateRequest.put("points", Arrays.asList(point));
+            
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(point, headers);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(updateRequest, headers);
             
             ResponseEntity<String> response = qdrantRestTemplate.exchange(
                 url, HttpMethod.PUT, request, String.class);
@@ -260,16 +299,33 @@ public class TransactionalCandidateService {
      */
     private void deleteFromQdrant(String candidateId) {
         try {
-            String url = qdrantUrl + "/collections/candidates/points/" + candidateId;
+            // Find Qdrant ID by searching for candidate ID in payload
+            int qdrantId = findQdrantIdByCandidateId(candidateId);
+            
+            if (qdrantId == -1) {
+                logger.warn("Candidate not found in Qdrant: {}", candidateId);
+                return; // Not found, but don't fail the operation
+            }
+            
+            // ISPRAVKA: Koristi POST endpoint sa points array
+            String url = qdrantUrl + "/collections/candidates/points/delete";
+            
+            // Kreiraj payload sa listom ID-jeva za brisanje
+            Map<String, Object> deleteRequest = new HashMap<>();
+            deleteRequest.put("points", Arrays.asList(qdrantId));
             
             HttpHeaders headers = new HttpHeaders();
-            HttpEntity<Void> request = new HttpEntity<>(headers);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(deleteRequest, headers);
             
             ResponseEntity<String> response = qdrantRestTemplate.exchange(
-                url, HttpMethod.DELETE, request, String.class);
+                url, HttpMethod.POST, request, String.class);
             
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("Failed to delete from Qdrant: " + response.getStatusCode());
+            if (response.getStatusCode().is2xxSuccessful()) {
+                logger.info("Successfully deleted candidate from Qdrant: {} (Qdrant ID: {})", candidateId, qdrantId);
+            } else {
+                logger.warn("Failed to delete from Qdrant: {} - {}", response.getStatusCode(), response.getBody());
+                throw new RuntimeException("Failed to delete candidate from Qdrant: " + response.getStatusCode());
             }
             
         } catch (Exception e) {
@@ -279,21 +335,95 @@ public class TransactionalCandidateService {
     }
     
     /**
-     * Combine CV and skills vectors into a single vector
+     * Find Qdrant ID by searching for candidate ID in payload
      */
-    private float[] combineVectors(float[] vector1, float[] vector2) {
-        if (vector1 == null && vector2 == null) return new float[384];
-        if (vector1 == null) return vector2;
-        if (vector2 == null) return vector1;
+    private int findQdrantIdByCandidateId(String candidateId) {
+        try {
+            logger.info("Finding Qdrant ID for candidate: {}", candidateId);
+            String url = qdrantUrl + "/collections/candidates/points/scroll";
+            
+            Map<String, Object> scrollRequest = new HashMap<>();
+            scrollRequest.put("limit", 10000); // Get all points
+            scrollRequest.put("with_payload", true);
+            scrollRequest.put("with_vector", false);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(scrollRequest, headers);
+            
+            @SuppressWarnings("rawtypes")
+            ResponseEntity<Map> response = qdrantRestTemplate.exchange(
+                url, HttpMethod.POST, request, Map.class);
+            
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> responseBody = response.getBody();
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = (Map<String, Object>) responseBody.get("result");
+                
+                if (result != null && result.containsKey("points")) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> points = (List<Map<String, Object>>) result.get("points");
+                    
+                    for (Map<String, Object> point : points) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> payload = (Map<String, Object>) point.get("payload");
+                        if (payload != null && candidateId.equals(payload.get("id"))) {
+                            // Return the Qdrant ID (point ID), not the payload ID
+                            int qdrantId = (Integer) point.get("id");
+                            logger.info("Found Qdrant ID {} for candidate {}", qdrantId, candidateId);
+                            return qdrantId;
+                        }
+                    }
+                }
+            }
+            
+            return -1; // Not found
+            
+        } catch (Exception e) {
+            logger.error("Error finding Qdrant ID for candidate ID {}: {}", candidateId, e.getMessage());
+            return -1;
+        }
+    }
+    
+    /**
+     * Convert any ID to numeric ID for Qdrant
+     */
+    private int convertToNumericId(String candidateId) {
+        try {
+            if (candidateId.startsWith("candidate_")) {
+                // For test data format: candidate_1 -> 1
+                String numericPart = candidateId.substring("candidate_".length());
+                return Integer.parseInt(numericPart);
+            } else {
+                // For UUID or other formats: use hash but ensure positive
+                return Math.abs(candidateId.hashCode());
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Could not convert ID to numeric: {}, using hash fallback", candidateId);
+            return Math.abs(candidateId.hashCode());
+        }
+    }
+    
+
+    /**
+     * Generate work experience text for vectorization (same logic as TestDataService)
+     */
+    private String generateWorkExperienceText(Candidate candidate) {
+        StringBuilder expText = new StringBuilder();
         
-        float[] combined = new float[384];
-        int half = 192;
+        // Simple work experience generation based on years of experience
+        if (candidate.getYearsOfExperience() != null && candidate.getYearsOfExperience() > 0) {
+            int years = candidate.getYearsOfExperience();
+            String position = candidate.getCurrentPosition() != null ? candidate.getCurrentPosition() : "Software Developer";
+            
+            expText.append(position).append(" with ").append(years).append(" years of experience ");
+            expText.append("in software development and technology solutions. ");
+            expText.append("Experienced in ").append(candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "Programming").append(". ");
+        }
         
-        // First half from vector1, second half from vector2
-        System.arraycopy(vector1, 0, combined, 0, Math.min(half, vector1.length));
-        System.arraycopy(vector2, 0, combined, half, Math.min(half, vector2.length));
-        
-        return combined;
+        return expText.toString();
     }
 }
 
