@@ -195,6 +195,56 @@ public class GatewayController : ControllerBase
         return await ForwardRequest("recruitment", "api/analytics/statistics", HttpMethod.Get);
     }
 
+    // Recruitment service endpoints - Reports
+    [HttpPost("recruitment/reports/generate")]
+    public async Task<IActionResult> GenerateReport()
+    {
+        return await ForwardRequest("recruitment", "api/reports/generate", HttpMethod.Post);
+    }
+
+    [HttpPost("recruitment/reports/generate/search-based")]
+    public async Task<IActionResult> GenerateSearchBasedReport()
+    {
+        return await ForwardRequest("recruitment", "api/reports/generate/search-based", HttpMethod.Post);
+    }
+
+    [HttpPost("recruitment/reports/generate/pdf")]
+    public async Task<IActionResult> GeneratePdfReport()
+    {
+        return await ForwardRequest("recruitment", "api/reports/generate/pdf", HttpMethod.Post);
+    }
+
+    [HttpPost("recruitment/reports/generate/pdf/search-based")]
+    public async Task<IActionResult> GenerateSearchBasedPdfReport()
+    {
+        return await ForwardRequest("recruitment", "api/reports/generate/pdf/search-based", HttpMethod.Post);
+    }
+
+    // Additional PDF endpoints with specific filenames
+    [HttpPost("recruitment/reports/generate/pdf/complete")]
+    public async Task<IActionResult> GenerateCompletePdfReport()
+    {
+        return await ForwardRequest("recruitment", "api/reports/generate/pdf", HttpMethod.Post);
+    }
+
+    [HttpPost("recruitment/reports/generate/pdf/search")]
+    public async Task<IActionResult> GenerateSearchPdfReport()
+    {
+        return await ForwardRequest("recruitment", "api/reports/generate/pdf/search-based", HttpMethod.Post);
+    }
+
+    [HttpGet("recruitment/reports/types")]
+    public async Task<IActionResult> GetReportTypes()
+    {
+        return await ForwardRequest("recruitment", "api/reports/types", HttpMethod.Get);
+    }
+
+    [HttpGet("recruitment/reports/health")]
+    public async Task<IActionResult> GetReportsHealth()
+    {
+        return await ForwardRequest("recruitment", "api/reports/health", HttpMethod.Get);
+    }
+
     private async Task<IActionResult> ForwardRequest(string serviceName, string path, HttpMethod method, bool includeAuth = false)
     {
         try
@@ -226,10 +276,24 @@ public class GatewayController : ControllerBase
 
             var response = await _serviceProxy.ForwardRequestAsync(serviceName, path, method, content, authToken);
             
-            var responseContent = await response.Content.ReadAsStringAsync();
-            
-            return StatusCode((int)response.StatusCode, 
-                string.IsNullOrEmpty(responseContent) ? null : responseContent);
+            // Check if response is PDF
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            if (contentType == "application/pdf")
+            {
+                var pdfBytes = await response.Content.ReadAsByteArrayAsync();
+                
+                // Try to get filename from Content-Disposition header
+                var contentDisposition = response.Content.Headers.ContentDisposition?.FileName;
+                var filename = !string.IsNullOrEmpty(contentDisposition) ? contentDisposition : GeneratePdfFilename(path);
+                
+                return File(pdfBytes, "application/pdf", filename);
+            }
+            else
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                return StatusCode((int)response.StatusCode, 
+                    string.IsNullOrEmpty(responseContent) ? null : responseContent);
+            }
         }
         catch (Exception ex)
         {
@@ -253,5 +317,23 @@ public class GatewayController : ControllerBase
             return authHeader.Substring("Bearer ".Length);
         }
         return null;
+    }
+
+    private string GeneratePdfFilename(string path)
+    {
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        
+        if (path.Contains("search-based"))
+        {
+            return $"search-results-report_{timestamp}.pdf";
+        }
+        else if (path.Contains("pdf"))
+        {
+            return $"candidate-report_{timestamp}.pdf";
+        }
+        else
+        {
+            return $"report_{timestamp}.pdf";
+        }
     }
 }
