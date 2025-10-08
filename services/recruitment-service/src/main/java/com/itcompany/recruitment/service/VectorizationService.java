@@ -20,7 +20,6 @@ public class VectorizationService {
     }
     /**
      * Vectorize text using local TF-IDF based method
-     * WITHOUT USING AI SERVICE
      */
     public float[] vectorizeText(String text) {
         if (text == null || text.trim().isEmpty()) {
