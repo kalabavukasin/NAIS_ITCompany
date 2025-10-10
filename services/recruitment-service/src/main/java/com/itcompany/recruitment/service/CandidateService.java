@@ -70,12 +70,12 @@ public class CandidateService {
         return candidates;
     }
     
-    // COMPLEX QUERY 1: Vector search combined with filtering (2+ conditions)
+    // COMPLEX QUERY 1: Vector search combined with filtering
     public List<Candidate> searchCandidatesWithVectorAndFilters(CandidateSearchRequest request) {
-        // Pravilno kreiranje Criteria objekta
+
+        //Start with an empty criteria
         Criteria criteria = null;
         
-        // Add filters (minimum 2 conditions as specified)
         if (request.getRequiredSkills() != null && !request.getRequiredSkills().isEmpty()) {
             Criteria skillsCriteria = Criteria.where("skills").in(request.getRequiredSkills());
             criteria = (criteria == null) ? skillsCriteria : criteria.and(skillsCriteria);
@@ -96,7 +96,7 @@ public class CandidateService {
             criteria = (criteria == null) ? salaryCriteria : criteria.and(salaryCriteria);
         }
         
-        // Ako nema kriterija, vraćamo praznu listu
+        // If no criteria provided, return empty list
         if (criteria == null) {
             logger.warn("No filters provided for searchCandidatesWithVectorAndFilters");
             return new ArrayList<>();
@@ -194,7 +194,7 @@ public class CandidateService {
     
     // COMPLEX QUERY 2: Hybrid search - combines vector and text search
     public List<Candidate> hybridSearch(String searchText, List<String> skills, String location) {
-        // Correct Criteria combination
+        // Start with an empty criteria
         Criteria criteria = null;
         
         // Text search
@@ -242,6 +242,7 @@ public class CandidateService {
     
     // Simple search method for fallback
     public List<Candidate> searchCandidates(String searchText, List<String> skills, String location, Integer limit) {
+        //Start with an empty criteria
         Criteria criteria = null;
         
         if (searchText != null && !searchText.trim().isEmpty()) {

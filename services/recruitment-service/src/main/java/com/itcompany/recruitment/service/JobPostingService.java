@@ -207,7 +207,6 @@ public class JobPostingService {
                     results.forEach(jobPosting -> {
                         Double score = vectorScores.get(jobPosting.getId());
                         if (score != null) {
-                            // You might want to add a matchScore field to JobPosting model
                             // jobPosting.setMatchScore(score);
                         }
                     });

@@ -185,12 +185,12 @@ public class TransactionalCandidateService {
             
             // Create combined vector from multiple fields (same logic as TestDataService)
             String cvContent = candidate.getCvContent() != null ? candidate.getCvContent() : "";
-            String skills = candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "";
-            String workExperience = generateWorkExperienceText(candidate);
+            //String skills = candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "";
+            //String workExperience = generateWorkExperienceText(candidate);
             
             // Create combined vector from multiple fields
-            String combinedText = cvContent + " " + skills + " " + workExperience;
-            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
+            //String combinedText = cvContent + " " + skills + " " + workExperience;
+            float[] combinedVector = vectorizationService.vectorizeText(cvContent);
             point.put("vector", combinedVector);
             
             // Store Elasticsearch ID in payload for mapping
@@ -251,12 +251,12 @@ public class TransactionalCandidateService {
             
             // Create combined vector from multiple fields (same logic as TestDataService)
             String cvContent = candidate.getCvContent() != null ? candidate.getCvContent() : "";
-            String skills = candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "";
-            String workExperience = generateWorkExperienceText(candidate);
+            //String skills = candidate.getSkills() != null ? String.join(", ", candidate.getSkills()) : "";
+            //String workExperience = generateWorkExperienceText(candidate);
             
             // Create combined vector from multiple fields
-            String combinedText = cvContent + " " + skills + " " + workExperience;
-            float[] combinedVector = vectorizationService.vectorizeText(combinedText);
+            //String combinedText = cvContent + " " + skills + " " + workExperience;
+            float[] combinedVector = vectorizationService.vectorizeText(cvContent);
             point.put("vector", combinedVector);
             
             // Store Elasticsearch ID in payload for mapping
@@ -272,7 +272,7 @@ public class TransactionalCandidateService {
             
             point.put("payload", payload);
             
-            // Kreiraj payload sa listom tačaka za update
+            // Make update request
             Map<String, Object> updateRequest = new HashMap<>();
             updateRequest.put("points", Arrays.asList(point));
             

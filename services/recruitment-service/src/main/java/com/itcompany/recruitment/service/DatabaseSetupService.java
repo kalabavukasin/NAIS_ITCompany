@@ -119,8 +119,6 @@ public class DatabaseSetupService {
     private void setupElasticsearchIndices() {
         logger.info("Setting up Elasticsearch indices...");
         
-        // Let Spring Data Elasticsearch automatically create indices based on @Document models
-        // This ensures proper mapping with vector fields
         
         logger.info("Elasticsearch indices will be created automatically by Spring Data Elasticsearch!");
     }
